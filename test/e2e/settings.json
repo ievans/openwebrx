@@ -8,7 +8,7 @@
                 "test": {
                     "name": "Test",
                     "center_freq": 145000000,
-                    "samp_rate": 250000,
+                    "samp_rate": 2400000,
                     "start_freq": 145000000,
                     "start_mod": "nfm",
                     "tuning_step": "1000"

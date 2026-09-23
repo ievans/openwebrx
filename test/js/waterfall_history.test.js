@@ -7,7 +7,7 @@ const FFT = 8;
 // Minimal chainable jQuery stand-in for the UI updates
 function $() {
     const o = {};
-    for (const m of ['toggleClass', 'hide', 'show', 'val', 'text', 'find', 'each', 'attr', 'css']) o[m] = () => o;
+    for (const m of ['toggleClass', 'hide', 'show', 'val', 'text', 'html', 'find', 'each', 'attr', 'css']) o[m] = () => o;
     o.is = () => false;
     return o;
 }
@@ -233,9 +233,9 @@ test('falls back to local audio when the server can not replay', () => {
     assert.ok(s.played.length >= 9 && s.played.every(v => v <= 100), 'local audio: ' + s.played);
 });
 
-test('dragging the slider sends one request when it settles', () => {
+test('seeking repeatedly sends one request when it settles', () => {
     const s = serverSetup();
-    for (let i = 0; i < 20; i++) s.h.seek(0.3 + i * 0.01);
+    for (let i = 0; i < 5; i++) s.h.skip(-1);
     s.runTimeouts();
     assert.strictEqual(starts(s).length, 2, 'initial request and one after seeking');
 });
@@ -257,4 +257,48 @@ test('pause and LIVE stop the server replay', () => {
     s.run(2);
     assert.strictEqual(s.played.length, 2, 'live audio plays');
     assert.strictEqual(s.audio.history.length, remembered + 2, 'live audio is remembered again');
+});
+
+// Without server replay, only audio recorded at the current tuning may play
+
+test('local replay never plays audio recorded at another frequency', () => {
+    const s = setup();
+    let tuning = '145000000 nfm';
+    s.audio.tuningProvider = () => tuning;
+    s.run(100);
+    s.h.skip(-5);
+    s.h.setSpeed(1);
+    s.played.length = 0;
+    s.play(1000);
+    assert.ok(s.played.length >= 9, 'recorded frequency plays: ' + s.played.length);
+    assert.strictEqual(s.h.localMismatch, false);
+    // user tunes elsewhere: no audio from the old frequency
+    tuning = '145500000 nfm';
+    s.played.length = 0;
+    s.play(1000);
+    assert.deepStrictEqual(s.played, [], 'played audio recorded at another frequency');
+    assert.strictEqual(s.h.localMismatch, true);
+    // tuning back plays again
+    tuning = '145000000 nfm';
+    s.play(1000);
+    assert.ok(s.played.length >= 9);
+    assert.strictEqual(s.h.localMismatch, false);
+});
+
+test('play/pause button pauses, plays at 1x, and never returns to live', () => {
+    const s = setup();
+    s.run(100);
+    s.h.togglePlay();                    // live: pause
+    assert.ok(!s.h.isLive());
+    assert.strictEqual(s.h.speed, 0);
+    s.h.togglePlay();                    // paused: play at 1x
+    assert.strictEqual(s.h.speed, 1);
+    assert.ok(!s.h.isLive());
+    s.h.togglePlay();                    // playing: pause again, not live
+    assert.strictEqual(s.h.speed, 0);
+    assert.ok(!s.h.isLive());
+    s.h.setSpeed(-4);                    // rewinding: pause
+    s.h.togglePlay();
+    assert.strictEqual(s.h.speed, 0);
+    assert.ok(!s.h.isLive());
 });

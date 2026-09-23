@@ -986,6 +986,7 @@ function on_ws_recv(evt) {
 
                         if ('iq_buffer_seconds' in config) {
                             iq_buffer_seconds = config['iq_buffer_seconds'] || 0;
+                            if (!iq_buffer_seconds) $('#openwebrx-bar-iq-buffer').progressbar().setOff();
                         }
 
                         if ('allow_iq_recording' in config || 'iq_buffer_seconds' in config) {
@@ -1054,6 +1055,9 @@ function on_ws_recv(evt) {
                         break;
                     case "cpuusage":
                         $('#openwebrx-bar-server-cpu').progressbar().setUsage(json['value']);
+                        break;
+                    case "memory":
+                        $('#openwebrx-bar-server-memory').progressbar().setMemory(json['value']);
                         break;
                     case "temperature":
                         $('#openwebrx-bar-server-cpu').progressbar().setTemp(json['value']);
@@ -1143,6 +1147,9 @@ function on_ws_recv(evt) {
                         break;
                     case 'replay':
                         wfHistory.onReplayStatus(json['value']);
+                        break;
+                    case 'iq_buffer':
+                        $('#openwebrx-bar-iq-buffer').progressbar().setStatus(json['value']);
                         break;
                     case 'log_message':
                         divlog(json['value'], true);
@@ -1506,7 +1513,9 @@ function openwebrx_init() {
     // Create waterfall history for pausing and rewinding
     wfHistory = new WaterfallHistory();
     audioEngine.setHistoryMaxAge(wfHistory.maxAge);
-    $('#openwebrx-history-length').val(wfHistory.maxAge / 60000);
+    audioEngine.tuningProvider = function() {
+        return UI.getFrequency() + ' ' + UI.getModulation();
+    };
 
     // Create bandplan ribbon display
     bandplan = new Bandplan(document.getElementById('openwebrx-bandplan-canvas'));

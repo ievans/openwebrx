@@ -29,7 +29,7 @@ test('IQ recording writes the SDR signal to a SigMF file', async () => {
     const file = (await messages(page)).match(/IQ recording saved to (IQ-\S+\.sigmf-data)/)[1];
     const r = readRecording(file);
     assert.strictEqual(r.meta.global['core:datatype'], 'cf32_le');
-    assert.strictEqual(r.rate, 250000);
+    assert.strictEqual(r.rate, 2400000);
     assert.strictEqual(r.meta.captures[0]['core:frequency'], h.CENTER);
     assert.ok(r.samples > 1.5 * r.rate && r.samples < 4 * r.rate, r.samples + ' samples');
     // The steady carrier is there at its programmed level (amplitude 0.05)
