@@ -104,6 +104,18 @@ Shortcuts.init = function(target) {
         <div class="ks-item-kbd">${this.keycap('S')}</div>
       </div>
       <div class="ks-item">
+        <div class="ks-item-txt">spike scanner / skip signal</div>
+        <div class="ks-item-kbd">${this.keycap('G')}|${this.keycap('Shift')}+${this.keycap('G')}</div>
+      </div>
+      <div class="ks-item">
+        <div class="ks-item-txt">pause waterfall / live</div>
+        <div class="ks-item-kbd">${this.keycap('W')}</div>
+      </div>
+      <div class="ks-item">
+        <div class="ks-item-txt">waterfall back|forward 10s</div>
+        <div class="ks-item-kbd">${this.keycap('Q')}|${this.keycap('E')}</div>
+      </div>
+      <div class="ks-item">
         <div class="ks-item-txt">tune by squelch</div>
         <div class="ks-item-kbd">${this.keycap('[')}|${this.keycap(']')}</div>
       </div>
@@ -317,6 +329,26 @@ Shortcuts.handleKey = function(event) {
         case 's':
             // S: Toggle scanner
             UI.toggleScanner();
+            break;
+
+        case 'g':
+            // SHIFT+G: Skip current spike, G: Toggle spike scanner
+            if (event.shiftKey) UI.lockoutSpike(); else UI.toggleSpikeScanner();
+            break;
+
+        case 'w':
+            // W: Pause waterfall or return to live
+            wfHistory.toggle();
+            break;
+
+        case 'q':
+            // Q: Waterfall history back 10 seconds
+            wfHistory.skip(-10);
+            break;
+
+        case 'e':
+            // E: Waterfall history forward 10 seconds
+            wfHistory.skip(10);
             break;
 
         case 'd':

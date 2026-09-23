@@ -37,6 +37,10 @@ var tuning_step = 1;
 var spectrum = null;
 var bandplan = null;
 var scanner = null;
+var spikeScanner = null;
+var wfHistory = null;
+var iq_recording_allowed = false;
+var iq_buffer_seconds = 0;
 var bookmarks = null;
 var audioEngine = null;
 var wf_data = null;
@@ -301,6 +305,7 @@ function scale_canvas_end_drag(evt) {
     if (!event_handled) {
         UI.setFrequency(UI.getFrequency(get_relative_x(evt)));
         UI.toggleScanner(false);
+        UI.toggleSpikeScanner(false);
     }
 }
 
@@ -741,6 +746,7 @@ function canvas_mouseup(evt) {
         if (!canvas_drag) {
             UI.setFrequency(UI.getFrequency(get_relative_x(evt)));
             UI.toggleScanner(false);
+            UI.toggleSpikeScanner(false);
         } else {
             canvas_end_drag();
         }
@@ -954,6 +960,9 @@ function on_ws_recv(evt) {
 
                             UI.toggleScanner(false);
                             tuning_step_reset();
+                            // Leave replay first, so that it does not repaint
+                            // the old profile's history over the cleared waterfall
+                            if (!wfHistory.isLive()) wfHistory.goLive();
                             waterfall_clear();
                             zoom_set(0);
                         }
@@ -968,6 +977,22 @@ function on_ws_recv(evt) {
                         if ('tuning_step' in config) {
                             tuning_step_default = config['tuning_step'];
                             tuning_step_reset();
+                        }
+
+                        if ('allow_iq_recording' in config) {
+                            iq_recording_allowed = !!config['allow_iq_recording'];
+                            $('.openwebrx-iq-record-button').css('display', iq_recording_allowed? '':'none');
+                        }
+
+                        if ('iq_buffer_seconds' in config) {
+                            iq_buffer_seconds = config['iq_buffer_seconds'] || 0;
+                        }
+
+                        if ('allow_iq_recording' in config || 'iq_buffer_seconds' in config) {
+                            var x = iq_recording_allowed && iq_buffer_seconds > 0;
+                            $('.openwebrx-iq-save-button')
+                                .css('display', x? '':'none')
+                                .attr('title', 'Save the last ' + iq_buffer_seconds + ' seconds of raw IQ buffered on the server');
                         }
 
                         if ('allow_audio_recording' in config) {
@@ -1110,6 +1135,12 @@ function on_ws_recv(evt) {
                             secondary_demod_push_data(value);
                         }
                         break;
+                    case 'iq_recording':
+                        UI.setIqRecordingStatus(json['value']);
+                        break;
+                    case 'iq_saved':
+                        UI.setIqSavedStatus(json['value']);
+                        break;
                     case 'log_message':
                         divlog(json['value'], true);
                         break;
@@ -1158,12 +1189,17 @@ function on_ws_recv(evt) {
                     waterfall_f32 = new Float32Array(waterfall_i16.length - COMPRESS_FFT_PAD_N);
                     for (i = 0; i < waterfall_i16.length; i++) waterfall_f32[i] = waterfall_i16[i + COMPRESS_FFT_PAD_N] / 100;
                 }
-                // Feed waterfall display with data
-                waterfall_add(waterfall_f32);
-                // Feed spectrum display with data
-                spectrum.update(waterfall_f32);
-                // Feed scanner with data
+                // Record data into waterfall history, only display it
+                // if we are not currently replaying history
+                if (wfHistory.push(waterfall_f32)) {
+                    // Feed waterfall display with data
+                    waterfall_add(waterfall_f32);
+                    // Feed spectrum display with data
+                    spectrum.update(waterfall_f32);
+                }
+                // Feed scanners with live data
                 scanner.update(waterfall_f32);
+                spikeScanner.update(waterfall_f32);
                 // Monitor waterfall levels for squelch-based tuning
                 monitorLevels(waterfall_f32);
                 break;
@@ -1459,6 +1495,14 @@ function openwebrx_init() {
 
     // Create bookmark scanner
     scanner = new Scanner(bookmarks, 1000);
+
+    // Create scanner that tunes to new signals
+    spikeScanner = new SpikeScanner();
+    spikeScanner.onLog = function() { UI.updateSpikeLog(); };
+
+    // Create waterfall history for pausing and rewinding
+    wfHistory = new WaterfallHistory();
+    $('#openwebrx-history-length').val(wfHistory.maxAge / 60000);
 
     // Create bandplan ribbon display
     bandplan = new Bandplan(document.getElementById('openwebrx-bandplan-canvas'));
