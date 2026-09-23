@@ -25,6 +25,7 @@ function SpikeScanner() {
     this.maxLog    = 500;   // maximum number of log entries
     this.active    = [];    // log entries for signals still on the air
     this.onLog     = null;  // called when the activity log changes
+    this.nextId    = 0;     // unique ID for log entries
     this.reset();
 }
 
@@ -120,7 +121,7 @@ SpikeScanner.prototype.track = function(spikes, data, floor, now) {
             }
         } else {
             e = {
-                start: now, last: now, freq: s.freq, peak: s.score,
+                id: ++me.nextId, start: now, last: now, freq: s.freq, peak: s.score,
                 width: s.width, binHz: binHz, active: true
             };
             me.active.push(e);
@@ -150,9 +151,11 @@ SpikeScanner.prototype.setSnr = function(snr) {
 // Ignore the signal we are currently parked on, and move on.
 SpikeScanner.prototype.lockoutCurrent = function() {
     if (!this.current) return false;
-    var halfBin = this.current.width * this.bw / this.baseline.length / 2;
+    // Same tolerance as used for matching signals in track(), so that
+    // a narrow signal whose centroid jitters by a bin stays locked out
+    var half = Math.max(this.current.width, 2) * this.bw / this.baseline.length;
     var f = this.current.freq;
-    this.lockouts.push([f - halfBin, f + halfBin]);
+    this.lockouts.push([f - half, f + half]);
     this.current = null;
     return true;
 };

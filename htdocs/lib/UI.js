@@ -488,7 +488,7 @@ UI.renderSpikeLog = function() {
     $('#openwebrx-spike-log-count').text('Activity: ' + log.length);
     $log.html(log.map(function(e, i) {
         var f = Utils.snapFrequency(e.freq, tuning_step);
-        return '<div class="openwebrx-spike-log-row' + (e.active? ' active' : '') + '" data-index="' + i + '">' +
+        return '<div class="openwebrx-spike-log-row' + (e.active? ' active' : '') + '" data-id="' + e.id + '">' +
             '<span class="spike-time" title="Show on waterfall">' + Utils.HHMMSS(e.start) + '</span>' +
             '<span class="spike-freq" title="Tune here">' + (f / 1e6).toFixed(4) + '</span>' +
             '<span class="spike-db">+' + Math.round(e.peak) + 'dB</span>' +
@@ -500,7 +500,9 @@ UI.renderSpikeLog = function() {
 // Handle clicks on the activity log.
 UI.clickSpikeLog = function(evt) {
     var $row = $(evt.target).closest('.openwebrx-spike-log-row');
-    var e = spikeScanner.log[parseInt($row.data('index'))];
+    // Look entry up by ID, since the log may have changed since rendering
+    var id = parseInt($row.data('id'));
+    var e = spikeScanner.log.find(function(e) { return e.id === id; });
     if (!e) return;
 
     if ($(evt.target).hasClass('spike-time')) {

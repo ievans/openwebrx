@@ -51,6 +51,7 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
         self.sdrSource  = sdrSource
         self.users      = 0
         self.lock       = threading.Lock()
+        self.saveLock   = threading.Lock()
         self.chunks     = deque()   # (datetime, center_freq, bytes)
         self.size       = 0
         self.sampleRate = 0
@@ -122,6 +123,16 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
     # Save up to the given number of most recent seconds into a new
     # SigMF recording. Returns status dictionary.
     def save(self, seconds: float):
+        # Only one save at a time, so that repeated requests can not
+        # flood the storage with parallel multi-megabyte writes
+        if not self.saveLock.acquire(blocking=False):
+            return {"file": None, "size": 0, "seconds": 0, "error": "Already saving IQ buffer"}
+        try:
+            return self._save(seconds)
+        finally:
+            self.saveLock.release()
+
+    def _save(self, seconds: float):
         # Take a snapshot of the data (chunks are immutable)
         wanted = int(seconds * self.sampleRate) * IqRecorder.BYTES_PER_SAMPLE
         with self.lock:

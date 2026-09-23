@@ -960,8 +960,10 @@ function on_ws_recv(evt) {
 
                             UI.toggleScanner(false);
                             tuning_step_reset();
-                            waterfall_clear();
+                            // Leave replay first, so that it does not repaint
+                            // the old profile's history over the cleared waterfall
                             if (!wfHistory.isLive()) wfHistory.goLive();
+                            waterfall_clear();
                             zoom_set(0);
                         }
 

@@ -167,6 +167,7 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         self.bookmarkSub = None
         self.iqRecorder = None
         self.iqBuffer = None
+        self.closed = False
         self.connectionProperties = {}
 
         # Get initial robot score based on the number of recent connections
@@ -199,6 +200,9 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         self.write_modes(modes)
 
         self.configSubs.append(SdrService.getActiveSources().wire(self._onSdrDeviceChanges))
+        self.configSubs.append(
+            Config.get().filter("allow_iq_recording", "iq_buffer_seconds").wire(lambda *args: self.startIqBuffer())
+        )
         self.configSubs.append(SdrService.getAvailableProfiles().wire(self._sendProfiles))
         self._sendProfiles()
 
@@ -429,14 +433,20 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         except (TypeError, ValueError):
             seconds = maxSeconds
         buffer = self.iqBuffer
+
+        def save():
+            status = buffer.save(seconds)
+            # Do not report back to a client that has disconnected meanwhile
+            if not self.closed:
+                self.write_iq_saved(status)
+
         # Writing hundreds of megabytes takes time, do not block the socket
-        threading.Thread(
-            target=lambda: self.write_iq_saved(buffer.save(seconds)),
-            name="iq-timeshift-save"
-        ).start()
+        threading.Thread(target=save, name="iq-timeshift-save").start()
 
     def startIqBuffer(self):
         self.stopIqBuffer()
+        if self.closed:
+            return
         pm = Config.get()
         if self.sdr is not None and pm["allow_iq_recording"] and pm["iq_buffer_seconds"] > 0:
             try:
@@ -535,6 +545,7 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         self.write_sdr_error("No SDR Devices available")
 
     def close(self, error: bool = False):
+        self.closed = True
         self.stopIqRecording(notify=False)
         self.stopIqBuffer()
         if self.sdr is not None:
