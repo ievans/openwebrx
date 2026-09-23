@@ -146,8 +146,13 @@ WaterfallHistory.prototype.goLive = function() {
     this.updateUi();
 };
 
-// Seek by a number of seconds relative to the current position.
+// Seek by a number of seconds relative to the current position. If the
+// waterfall was moving (live, or already playing back), it keeps moving
+// afterwards, at the same speed, rather than leaving it stuck at the new
+// position.
 WaterfallHistory.prototype.skip = function(seconds) {
+    var wasMoving = this.live || this.speed != 0;
+    var speed = this.speed || 1;
     if (!this.freeze()) return;
     var t = this.frames[this.cursor].t + seconds * 1000;
     this.cursor = this.indexAt(t);
@@ -155,11 +160,30 @@ WaterfallHistory.prototype.skip = function(seconds) {
     this.audioT = null;
     if (this.cursor >= this.frames.length - 1 && seconds > 0) {
         this.goLive();
+    } else if (wasMoving) {
+        this.setSpeed(speed);
     } else {
         this.syncAudio(true);
         this.requestRedraw();
         this.updateUi();
     }
+};
+
+// Click on the live waterfall to jump straight to that moment in time and
+// start playing right away, instead of having to pause and skip back.
+// relativeY is measured in pixels down from the top of the visible
+// waterfall, where 0 is "now" and each row further down is one frame
+// further into the past. Returns FALSE if that time is no longer buffered.
+WaterfallHistory.prototype.clickSeek = function(relativeY) {
+    // A click right at the top is just tuning, not a time jump
+    if (relativeY < 5) return true;
+    if (this.frames.length < 2) return false;
+    var idx = this.frames.length - 1 - Math.round(relativeY);
+    if (idx < 0) return false;
+    if (!this.freeze()) return false;
+    this.cursor = idx;
+    this.setSpeed(1);
+    return true;
 };
 
 // Show the waterfall as it was at time T, with a few seconds after T
@@ -328,8 +352,33 @@ WaterfallHistory.prototype.formatDelta = function(sec) {
     return '-' + m + ':' + ('' + s).padStart(2, '0');
 };
 
+// Mark on the waterfall itself how far back the server's IQ buffer reaches,
+// so it is clear at a glance how far one can click/rewind and still hear
+// replayed audio, not just see the past spectrum.
+WaterfallHistory.prototype.updateBufferMarker = function() {
+    var $marker = $('#openwebrx-iq-buffer-marker');
+    if (!this.canReplayOnServer() || this.frames.length < 2 ||
+        typeof canvas_container === 'undefined' || !canvas_container) {
+        $marker.hide();
+        return;
+    }
+
+    var topIdx  = this.live? this.frames.length - 1 : this.cursor;
+    var limitT  = this.frames[topIdx].t - iq_buffer_seconds * 1000;
+    var height  = canvas_container.clientHeight;
+    var offset  = topIdx - this.indexAt(limitT);
+
+    if (limitT < this.frames[0].t || offset <= 0 || offset >= height) {
+        $marker.hide();
+    } else {
+        $marker.css('top', offset + 'px').show();
+    }
+};
+
 WaterfallHistory.prototype.updateUi = function() {
     this.lastUi = Date.now();
+
+    this.updateBufferMarker();
 
     var $overlay = $('#openwebrx-history-overlay');
     var $label   = $('#openwebrx-history-label');
