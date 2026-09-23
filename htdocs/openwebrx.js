@@ -39,6 +39,8 @@ var bandplan = null;
 var scanner = null;
 var spikeScanner = null;
 var wfHistory = null;
+var iq_recording_allowed = false;
+var iq_buffer_seconds = 0;
 var bookmarks = null;
 var audioEngine = null;
 var wf_data = null;
@@ -976,8 +978,19 @@ function on_ws_recv(evt) {
                         }
 
                         if ('allow_iq_recording' in config) {
-                            var x = config['allow_iq_recording'];
-                            $('.openwebrx-iq-record-button').css('display', x? '':'none');
+                            iq_recording_allowed = !!config['allow_iq_recording'];
+                            $('.openwebrx-iq-record-button').css('display', iq_recording_allowed? '':'none');
+                        }
+
+                        if ('iq_buffer_seconds' in config) {
+                            iq_buffer_seconds = config['iq_buffer_seconds'] || 0;
+                        }
+
+                        if ('allow_iq_recording' in config || 'iq_buffer_seconds' in config) {
+                            var x = iq_recording_allowed && iq_buffer_seconds > 0;
+                            $('.openwebrx-iq-save-button')
+                                .css('display', x? '':'none')
+                                .attr('title', 'Save the last ' + iq_buffer_seconds + ' seconds of raw IQ buffered on the server');
                         }
 
                         if ('allow_audio_recording' in config) {
@@ -1122,6 +1135,9 @@ function on_ws_recv(evt) {
                         break;
                     case 'iq_recording':
                         UI.setIqRecordingStatus(json['value']);
+                        break;
+                    case 'iq_saved':
+                        UI.setIqSavedStatus(json['value']);
                         break;
                     case 'log_message':
                         divlog(json['value'], true);
@@ -1480,6 +1496,7 @@ function openwebrx_init() {
 
     // Create scanner that tunes to new signals
     spikeScanner = new SpikeScanner();
+    spikeScanner.onLog = function() { UI.updateSpikeLog(); };
 
     // Create waterfall history for pausing and rewinding
     wfHistory = new WaterfallHistory();

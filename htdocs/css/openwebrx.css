@@ -2362,3 +2362,36 @@ img.openwebrx-mirror-img
     cursor: pointer;
     white-space: nowrap;
 }
+
+.openwebrx-spike-log {
+    max-height: 120px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 9pt;
+    cursor: pointer;
+}
+
+.openwebrx-spike-log:empty:before {
+    content: 'No activity yet';
+    opacity: 0.5;
+}
+
+.openwebrx-spike-log-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 1px 2px;
+    border-radius: 3px;
+}
+
+.openwebrx-spike-log-row:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.openwebrx-spike-log-row.active {
+    color: #80ff80;
+}
+
+.openwebrx-spike-log-row .spike-time:hover,
+.openwebrx-spike-log-row .spike-freq:hover {
+    text-decoration: underline;
+}

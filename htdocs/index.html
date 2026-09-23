@@ -308,11 +308,23 @@
                             <div title="Spike scanner: tune to the strongest signal appearing after the scanner starts (right-click to skip current signal)" class="openwebrx-button openwebrx-tool-button openwebrx-spike-button" onclick="UI.toggleSpikeScanner();" oncontextmenu="UI.lockoutSpike();return false;">SPIKE</div>
                             <div title="Forget all skipped signals" class="openwebrx-button openwebrx-tool-button" onclick="UI.clearSpikeLockouts();">UNSKIP</div>
                             <div title="Record raw IQ spectrum on the server" class="openwebrx-button openwebrx-tool-button openwebrx-iq-record-button" style="display:none;" onclick="UI.toggleIqRecording();">&#9679;&nbsp;IQ</div>
+                            <div title="Save the last seconds of raw IQ buffered on the server" class="openwebrx-button openwebrx-tool-button openwebrx-iq-save-button" style="display:none;" onclick="UI.saveIqBuffer();">&#9194;&nbsp;SAVE</div>
                         </div>
                         <div class="openwebrx-panel-line openwebrx-panel-flex-line">
                             <span class="openwebrx-tool-label" title="Spike must be this many dB above the noise floor">SNR</span>
                             <input title="Spike scanner threshold (dB above noise floor)" id="openwebrx-spike-snr" class="openwebrx-tool-slider" type="range" min="4" max="40" value="12" step="1" oninput="UI.setSpikeSnr(this.value);" onchange="UI.setSpikeSnr(this.value);">
                             <span class="openwebrx-tool-label" id="openwebrx-spike-snr-value">12dB</span>
+                        </div>
+                        <div class="openwebrx-panel-line openwebrx-panel-flex-line">
+                            <label class="openwebrx-checkbox openwebrx-tool-label" title="Tune to new signals, or only log them">
+                                <input id="openwebrx-spike-autotune" type="checkbox" checked onchange="UI.setSpikeAutoTune(this.checked);" />Tune
+                            </label>
+                            <span class="openwebrx-tool-label" id="openwebrx-spike-log-count" style="flex:1;">Activity: 0</span>
+                            <div title="Download activity log as CSV" class="openwebrx-button openwebrx-tool-button" style="flex:0 0 40px;" onclick="UI.exportSpikeLog();">CSV</div>
+                            <div title="Clear activity log" class="openwebrx-button openwebrx-tool-button" style="flex:0 0 50px;" onclick="UI.clearSpikeLog();">CLEAR</div>
+                        </div>
+                        <div class="openwebrx-panel-line">
+                            <div id="openwebrx-spike-log" class="openwebrx-spike-log" title="Click frequency to tune, click time to show on waterfall" onclick="UI.clickSpikeLog(event);"></div>
                         </div>
                         <div class="openwebrx-panel-line openwebrx-panel-flex-line">
                             <div title="Pause waterfall / return to live" class="openwebrx-button openwebrx-tool-button openwebrx-history-button" onclick="wfHistory.toggle();">&#10074;&#10074;</div>

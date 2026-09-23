@@ -12,6 +12,37 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def makeSigmfCapture(sampleStart: int, frequency: int, timestamp: datetime = None):
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+    return {
+        "core:sample_start": sampleStart,
+        "core:frequency": frequency,
+        "core:datetime": timestamp.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+    }
+
+
+# Write SigMF metadata file next to the given .sigmf-data file
+def writeSigmfMeta(dataPath: str, sampleRate: int, captures: list, sdrSource):
+    metaPath = dataPath[:-len(".sigmf-data")] + ".sigmf-meta"
+    meta = {
+        "global": {
+            "core:datatype": "cf32_le",
+            "core:sample_rate": sampleRate,
+            "core:version": "1.0.0",
+            "core:recorder": "OpenWebRX+ {0}".format(openwebrx_version),
+            "core:hw": sdrSource.getName(),
+            "core:description": "{0} / {1}".format(
+                sdrSource.getName(), sdrSource.getProfileName()
+            ),
+        },
+        "captures": captures,
+        "annotations": [],
+    }
+    with open(metaPath, "w") as f:
+        json.dump(meta, f, indent=2)
+
+
 #
 # Records raw IQ samples coming from an SDR source into a SigMF recording
 # (.sigmf-data file with complex float32 samples, plus .sigmf-meta file
@@ -104,11 +135,7 @@ class IqRecorder(SdrSourceEventClient):
             reader.stop()
 
     def _makeCapture(self, sampleStart: int, frequency: int):
-        return {
-            "core:sample_start": sampleStart,
-            "core:frequency": frequency,
-            "core:datetime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-        }
+        return makeSigmfCapture(sampleStart, frequency)
 
     def _onCenterFreqChange(self, changes):
         if "center_freq" not in changes:
@@ -160,23 +187,7 @@ class IqRecorder(SdrSourceEventClient):
                     logger.exception("Exception reporting IQ recording status")
 
     def _writeMeta(self):
-        metaPath = self.dataPath[:-len(".sigmf-data")] + ".sigmf-meta"
-        meta = {
-            "global": {
-                "core:datatype": "cf32_le",
-                "core:sample_rate": self.sampleRate,
-                "core:version": "1.0.0",
-                "core:recorder": "OpenWebRX+ {0}".format(openwebrx_version),
-                "core:hw": self.sdrSource.getName(),
-                "core:description": "{0} / {1}".format(
-                    self.sdrSource.getName(), self.sdrSource.getProfileName()
-                ),
-            },
-            "captures": self.captures,
-            "annotations": [],
-        }
-        with open(metaPath, "w") as f:
-            json.dump(meta, f, indent=2)
+        writeSigmfMeta(self.dataPath, self.sampleRate, self.captures, self.sdrSource)
 
     def _cleanup(self):
         while self.subs:

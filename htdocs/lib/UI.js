@@ -44,6 +44,7 @@ UI.loadSettings = function() {
     this.setNR(LS.has('nr_threshold')? LS.loadInt('nr_threshold') : 0);
     this.toggleNR(LS.has('nr_enabled')? LS.loadBool('nr_enabled') : false);
     this.setSpikeSnr(LS.has('spike_snr')? LS.loadInt('spike_snr') : 12);
+    this.setSpikeAutoTune(LS.has('spike_autotune')? LS.loadBool('spike_autotune') : true);
 
     // Toggle UI sections
     for (section in this.sections) {
@@ -443,6 +444,75 @@ UI.clearSpikeLockouts = function() {
     this.showBubble('Skipped signals cleared');
 };
 
+UI.setSpikeAutoTune = function(on) {
+    spikeScanner.setAutoTune(on);
+    $('#openwebrx-spike-autotune').prop('checked', !!on);
+    LS.save('spike_autotune', !!on);
+};
+
+UI.clearSpikeLog = function() {
+    spikeScanner.clearLog();
+};
+
+UI.exportSpikeLog = function() {
+    var d = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').substring(0, 15);
+    var blob = new Blob([spikeScanner.getLogCsv()], { type: 'text/csv' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'SPIKES-' + d + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() {
+        URL.revokeObjectURL(a.href);
+        document.body.removeChild(a);
+    }, 1000);
+};
+
+// Redraw the activity log, but not more often than twice a second.
+UI.updateSpikeLog = function() {
+    if (this.spikeLogTimer) return;
+    this.spikeLogTimer = setTimeout(function() {
+        UI.spikeLogTimer = 0;
+        UI.renderSpikeLog();
+    }, 500);
+};
+
+UI.renderSpikeLog = function() {
+    var log = spikeScanner.log;
+    var $log = $('#openwebrx-spike-log');
+    var dur = function(e) {
+        var s = Math.round((e.last - e.start) / 1000);
+        return s < 60? s + 's' : Math.floor(s / 60) + 'm' + ('' + (s % 60)).padStart(2, '0');
+    };
+
+    $('#openwebrx-spike-log-count').text('Activity: ' + log.length);
+    $log.html(log.map(function(e, i) {
+        var f = Utils.snapFrequency(e.freq, tuning_step);
+        return '<div class="openwebrx-spike-log-row' + (e.active? ' active' : '') + '" data-index="' + i + '">' +
+            '<span class="spike-time" title="Show on waterfall">' + Utils.HHMMSS(e.start) + '</span>' +
+            '<span class="spike-freq" title="Tune here">' + (f / 1e6).toFixed(4) + '</span>' +
+            '<span class="spike-db">+' + Math.round(e.peak) + 'dB</span>' +
+            '<span class="spike-dur">' + dur(e) + '</span>' +
+            '</div>';
+    }).join(''));
+};
+
+// Handle clicks on the activity log.
+UI.clickSpikeLog = function(evt) {
+    var $row = $(evt.target).closest('.openwebrx-spike-log-row');
+    var e = spikeScanner.log[parseInt($row.data('index'))];
+    if (!e) return;
+
+    if ($(evt.target).hasClass('spike-time')) {
+        // Show the moment the signal appeared on the waterfall
+        if (!wfHistory.seekTime(e.start)) this.showBubble('No longer in waterfall history');
+    } else {
+        // Stay on the chosen signal, keep logging activity
+        this.setSpikeAutoTune(false);
+        this.setFrequency(e.freq);
+    }
+};
+
 //
 // Server-side IQ Recording Controls
 //
@@ -460,6 +530,31 @@ UI.toggleIqRecording = function(on) {
             "key": this.getDemodulatorPanel().getMagicKey()
         }
     }));
+};
+
+// Ask server to save the last few seconds of buffered IQ data.
+UI.saveIqBuffer = function() {
+    ws.send(JSON.stringify({
+        "type": "iqrecord",
+        "params": {
+            "action": "save",
+            "key": this.getDemodulatorPanel().getMagicKey()
+        }
+    }));
+    this.showBubble('Saving buffered IQ...');
+};
+
+// Handle result of saving buffered IQ data.
+UI.setIqSavedStatus = function(status) {
+    if (status.error) {
+        divlog('IQ save: ' + status.error, true);
+        this.showBubble('IQ save: ' + Utils.htmlEscape(status.error));
+    } else {
+        var mb = Math.round((status.size || 0) / 1024 / 1024);
+        var sec = Math.round(status.seconds || 0);
+        divlog('Saved last ' + sec + 's of IQ to ' + status.file + ' (' + mb + 'MB).');
+        this.showBubble('Saved last ' + sec + 's to ' + Utils.htmlEscape(status.file) + ' (' + mb + 'MB)');
+    }
 };
 
 // Handle IQ recording status reported by the server.

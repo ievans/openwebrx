@@ -167,6 +167,20 @@ WaterfallHistory.prototype.skip = function(seconds) {
     }
 };
 
+// Show the waterfall as it was at time T, with a few seconds after T
+// on top so that whatever started at T is visible. Returns FALSE if T
+// is no longer in the history.
+WaterfallHistory.prototype.seekTime = function(t, after = 3) {
+    if (!this.frames.length || t < this.frames[0].t) return false;
+    if (!this.freeze()) return false;
+    this.setSpeed(0);
+    this.cursor = this.indexAt(t + after * 1000);
+    this.playT  = this.frames[this.cursor].t;
+    this.requestRedraw();
+    this.updateUi();
+    return true;
+};
+
 // Find the newest frame not newer than time T.
 WaterfallHistory.prototype.indexAt = function(t) {
     var lo = 0, hi = this.frames.length - 1;
