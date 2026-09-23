@@ -8,7 +8,8 @@ RUN apt-get update && \
 
 WORKDIR /build/openwebrx
 COPY . .
-RUN dpkg-buildpackage -us -uc -b
+# Skip the unit tests: they import pycsdr, which is only available at runtime
+RUN DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc -b
 
 
 # Runtime image: install the freshly built package, pulling its
