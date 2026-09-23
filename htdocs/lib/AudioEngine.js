@@ -337,6 +337,7 @@ AudioEngine.prototype.pushHdAudio = function(data) {
 
 // Store decoded audio with its arrival time, dropping old audio.
 AudioEngine.prototype.remember = function(pcm, hd) {
+    if (this.historyEnabled === false) return;
     var now = Date.now();
     this.history.push({ t: now, hd: hd, pcm: pcm });
     this.historyBytes += pcm.byteLength;
@@ -348,6 +349,11 @@ AudioEngine.prototype.remember = function(pcm, hd) {
         ++n;
     }
     if (n > 0) this.history.splice(0, n);
+};
+
+// Stop remembering incoming audio, e.g. while it is replayed by the server.
+AudioEngine.prototype.setHistoryEnabled = function(enabled) {
+    this.historyEnabled = !!enabled;
 };
 
 AudioEngine.prototype.setHistoryMaxAge = function(msec) {

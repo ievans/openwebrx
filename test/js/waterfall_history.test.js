@@ -14,6 +14,8 @@ function $() {
 
 function setup() {
     const clock = { now: 0 };
+    const timeouts = [];   // pending setTimeout() callbacks
+    const sent = [];       // messages sent to the server
     const drawn = [];      // waterfall lines drawn, as their first value
     const played = [];     // audio chunks sent to the speakers, as their first sample
     const ctx = load(['lib/AudioEngine.js', 'lib/WaterfallHistory.js'], {
@@ -25,6 +27,9 @@ function setup() {
         spectrum: { update: () => {} },
         requestAnimationFrame: f => f(),
         setInterval: () => 1, clearInterval: () => {},
+        // Timeouts only run when the test says so
+        setTimeout: f => { timeouts.push(f); return timeouts.length; }, clearTimeout: () => {},
+        ws: { send: m => sent.push(JSON.parse(m)) },
     });
     // Audio engine without a real audio device: output is captured
     const audio = Object.create(ctx.AudioEngine.prototype);
@@ -58,7 +63,8 @@ function setup() {
             if (clock.now % 40 == 0) h.tick();
         }
     };
-    return { h, audio, drawn, played, run, step, play, ctx };
+    const runTimeouts = () => { while (timeouts.length) timeouts.shift()(); };
+    return { h, audio, drawn, played, run, step, play, ctx, sent, runTimeouts, receive };
 }
 
 test('live: lines are drawn and audio is played', () => {
@@ -167,4 +173,88 @@ test('frames recorded at another center frequency are remapped', () => {
     // old spectrum's upper half now shows in the lower half, the rest is empty
     assert.deepStrictEqual(Array.from(d.slice(0, 4)), [-1, -1, -1, -1]);
     assert.deepStrictEqual(Array.from(d.slice(4)), [-200, -200, -200, -200]);
+});
+
+// Server side IQ replay (tune anywhere while listening to the past)
+
+function serverSetup() {
+    const s = setup();
+    s.ctx.iq_buffer_seconds = 30;
+    s.run(100);                 // 10 seconds of history
+    s.h.skip(-5);
+    s.h.setSpeed(1);
+    s.runTimeouts();
+    return s;
+}
+
+const starts = s => s.sent.filter(m => m.type === 'replay' && m.params.action === 'start');
+const stops = s => s.sent.filter(m => m.type === 'replay' && m.params.action === 'stop');
+
+test('playback asks the server to replay IQ from the right time', () => {
+    const s = serverSetup();
+    const req = starts(s);
+    assert.strictEqual(req.length, 1);
+    assert.ok(Math.abs(req[0].params.age_ms - 5000) <= 100, 'age ' + req[0].params.age_ms);
+});
+
+test('no audio while waiting for the server', () => {
+    const s = serverSetup();
+    s.played.length = 0;
+    s.play(1000);
+    assert.deepStrictEqual(s.played, [], 'neither live nor locally remembered audio');
+});
+
+test('once the server replays, its audio stream is played and not remembered', () => {
+    const s = serverSetup();
+    s.h.onReplayStatus({ id: starts(s)[0].params.id, active: true, error: null });
+    s.played.length = 0;
+    const remembered = s.audio.history.length;
+    s.play(1000);
+    // the incoming stream is now the server's replay, it must be heard
+    assert.ok(s.played.length >= 9, 'played ' + s.played.length);
+    assert.ok(s.played.every(v => v > 100), 'played what the server sent, not local audio: ' + s.played);
+    assert.strictEqual(s.audio.history.length, remembered, 'replayed audio must not go into live history');
+});
+
+test('stale server answers are ignored', () => {
+    const s = serverSetup();
+    const first = starts(s)[0].params.id;
+    s.h.skip(-2);              // seek: new request
+    s.runTimeouts();
+    s.h.onReplayStatus({ id: first, active: true, error: null });
+    assert.strictEqual(s.h.serverReplay, 'pending');
+});
+
+test('falls back to local audio when the server can not replay', () => {
+    const s = serverSetup();
+    s.h.onReplayStatus({ id: starts(s)[0].params.id, active: false, error: 'No IQ data buffered' });
+    s.played.length = 0;
+    s.play(1000);
+    assert.ok(s.played.length >= 9 && s.played.every(v => v <= 100), 'local audio: ' + s.played);
+});
+
+test('dragging the slider sends one request when it settles', () => {
+    const s = serverSetup();
+    for (let i = 0; i < 20; i++) s.h.seek(0.3 + i * 0.01);
+    s.runTimeouts();
+    assert.strictEqual(starts(s).length, 2, 'initial request and one after seeking');
+});
+
+test('pause and LIVE stop the server replay', () => {
+    const s = serverSetup();
+    s.h.onReplayStatus({ id: starts(s)[0].params.id, active: true, error: null });
+    s.h.pause();
+    assert.strictEqual(stops(s).length, 1);
+    s.played.length = 0;
+    s.play(500);
+    assert.deepStrictEqual(s.played, [], 'silent while paused');
+    s.h.setSpeed(1);
+    s.runTimeouts();
+    s.h.goLive();
+    assert.strictEqual(stops(s).length, 2);
+    s.played.length = 0;
+    const remembered = s.audio.history.length;
+    s.run(2);
+    assert.strictEqual(s.played.length, 2, 'live audio plays');
+    assert.strictEqual(s.audio.history.length, remembered + 2, 'live audio is remembered again');
 });

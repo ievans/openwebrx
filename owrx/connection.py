@@ -16,6 +16,7 @@ from owrx.modes import Modes, DigitalMode
 from owrx.config import Config
 from owrx.waterfall import WaterfallOptions
 from owrx.iqrecorder import IqRecorder
+from owrx.iqreplay import IqReplay, ReplayUnavailable
 from owrx.iqbuffer import IqTimeShiftBuffer
 from owrx.websocket import Handler
 from queue import Queue, Full, Empty
@@ -167,6 +168,8 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         self.bookmarkSub = None
         self.iqRecorder = None
         self.iqBuffer = None
+        self.iqReplay = None
+        self.replayLock = threading.Lock()
         self.closed = False
         self.connectionProperties = {}
 
@@ -361,6 +364,12 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
                             key   = params["key"] if "key" in params else None
                             if magic == "" or key == magic:
                                 self.sdr.setCenterFreq(freq)
+                elif message["type"] == "replay":
+                    params = message["params"] if "params" in message else {}
+                    if params.get("action") == "start":
+                        self.startReplay(params.get("age_ms"), params.get("id"))
+                    else:
+                        self.stopReplay()
                 elif message["type"] == "iqrecord":
                     params = message["params"] if "params" in message else {}
                     if params.get("action") == "start":
@@ -443,18 +452,60 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         # Writing hundreds of megabytes takes time, do not block the socket
         threading.Thread(target=save, name="iq-timeshift-save").start()
 
+    # Replay buffered IQ into this client's demodulator, from AGE_MS ago,
+    # so that the user can listen anywhere in the spectrum in the past
+    def startReplay(self, age_ms, requestId=None):
+        with self.replayLock:
+            self._stopReplay()
+            error = None
+            if self.iqBuffer is None:
+                error = "IQ time-shift buffer is disabled"
+            else:
+                dsp = self.getDsp()
+                try:
+                    age = float(age_ms) / 1000
+                    if dsp is None:
+                        raise ReplayUnavailable("Demodulator not running")
+                    replay = IqReplay(self.iqBuffer, dsp, self.sdr, lambda err: self._onReplayStopped(replay, requestId, err))
+                    replay.start(age)
+                    self.iqReplay = replay
+                except (TypeError, ValueError):
+                    error = "Invalid replay time"
+                except ReplayUnavailable as e:
+                    error = str(e)
+            self.write_replay({"id": requestId, "active": error is None, "error": error})
+
+    def stopReplay(self):
+        with self.replayLock:
+            self._stopReplay()
+
+    def _stopReplay(self):
+        if self.iqReplay is not None:
+            self.iqReplay.stop()
+            self.iqReplay = None
+
+    def _onReplayStopped(self, replay, requestId, error):
+        # Replay ended by itself (e.g. retune), tell the client
+        with self.replayLock:
+            if self.iqReplay is replay:
+                self.iqReplay = None
+        if not self.closed:
+            self.write_replay({"id": requestId, "active": False, "error": error})
+
     def startIqBuffer(self):
         self.stopIqBuffer()
         if self.closed:
             return
         pm = Config.get()
-        if self.sdr is not None and pm["allow_iq_recording"] and pm["iq_buffer_seconds"] > 0:
+        # The buffer is used both for saving and replaying IQ data
+        if self.sdr is not None and pm["iq_buffer_seconds"] > 0:
             try:
                 self.iqBuffer = IqTimeShiftBuffer.acquire(self.sdr)
             except Exception:
                 logger.exception("Failed to start IQ time-shift buffer")
 
     def stopIqBuffer(self):
+        self.stopReplay()
         if self.iqBuffer is not None:
             IqTimeShiftBuffer.release(self.iqBuffer)
             self.iqBuffer = None
@@ -561,6 +612,7 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         super().close(error)
 
     def stopDsp(self):
+        self.stopReplay()
         with self.dspLock:
             if self.dsp is not None:
                 self.dsp.stop()
@@ -636,6 +688,9 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
 
     def write_iq_recording(self, status):
         self.send({"type": "iq_recording", "value": status})
+
+    def write_replay(self, status):
+        self.send({"type": "replay", "value": status})
 
     def write_iq_saved(self, status):
         self.send({"type": "iq_saved", "value": status})

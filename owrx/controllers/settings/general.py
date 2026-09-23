@@ -150,9 +150,10 @@ class GeneralSettingsController(SettingsFormController):
                     "iq_buffer_seconds",
                     "IQ time-shift buffer",
                     append="seconds",
-                    infotext="Keep this many seconds of raw IQ data in memory, so that users can save "
-                    + "signals that have already happened. Set to 0 to disable. Needs IQ recording "
-                    + "to be allowed. Uses 8 bytes per sample of RAM, i.e. about 19MB per second at 2.4MS/s.",
+                    infotext="Keep this many seconds of raw IQ data in memory. Users can then rewind the "
+                    + "waterfall and listen anywhere in the spectrum in the past, and save signals that "
+                    + "have already happened (saving needs IQ recording to be allowed). Set to 0 to disable. "
+                    + "Uses 8 bytes per sample of RAM, i.e. about 19MB per second at 2.4MS/s.",
                     validator=RangeValidator(0, 600),
                 ),
                 CheckboxInput(

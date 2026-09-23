@@ -41,14 +41,14 @@ test('IQ recording writes the SDR signal to a SigMF file', async () => {
 
 test('SAVE writes the last seconds from the time-shift buffer', async () => {
     const page = await h.openReceiver(browser);
-    await page.waitForTimeout(7000);          // fill the 5 second buffer
+    await page.waitForTimeout(13000);         // fill the 12 second buffer
     await page.click('.openwebrx-iq-save-button');
     await page.waitForFunction(() => /Saved last \d+s of IQ to (IQ-\S+\.sigmf-data)/.test($('#openwebrx-messages').text()), null, { timeout: 10000 });
     const log = await messages(page);
     const file = log.match(/Saved last \d+s of IQ to (IQ-\S+\.sigmf-data)/)[1];
     const r = readRecording(file);
-    assert.ok(Math.abs(r.samples / r.rate - 5) < 0.2, (r.samples / r.rate) + ' seconds saved');
-    // 5 seconds always span an on/off switch of the 3 second burst
+    assert.ok(Math.abs(r.samples / r.rate - 12) < 0.3, (r.samples / r.rate) + ' seconds saved');
+    // 12 seconds always span on/off switches of the 3 second burst
     const levels = [];
     for (let t = 0; t + 0.1 < r.samples / r.rate; t += 0.25) levels.push(h.toneLevel(r.iq, r.rate, -60000, Math.floor(t * r.rate)));
     assert.ok(levels.some(l => Math.abs(l + 14) < 1), 'burst on at -14 dBFS: ' + levels.map(Math.round));

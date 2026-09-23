@@ -31,6 +31,8 @@ test('pause, LIVE, keys and playback control waterfall and audio', async () => {
 
     await page.click('text=-10s');
     await page.click('.openwebrx-history-speed[data-speed="1"]');
+    // Audio source settles once the server answers the replay request
+    await page.waitForFunction(() => ['active', 'failed'].includes(wfHistory.serverReplay), null, { timeout: 5000 });
     s = await h.historyState(page);
     assert.ok(!s.live && s.speed === 1, 'playing history: ' + JSON.stringify(s));
     assert.match(s.badge, /replaying audio/);
@@ -72,44 +74,87 @@ test('pause, LIVE, keys and playback control waterfall and audio', async () => {
     await page.close();
 });
 
-test('playback plays the audio recorded at that time, not the live feed', async () => {
-    const page = await h.openReceiver(browser);
-    // Tuned to the burst in FM, audio is quiet while it is on and noisy while
-    // it is off, so loudness over time follows the 3s on / 3s off pattern
-    await page.evaluate(f => { UI.setModulation('nfm'); UI.setFrequency(f, false); }, h.BURST);
-    await page.waitForTimeout(16000);
-    const r = await page.evaluate(async () => {
-        wfHistory.skip(-10);
-        $('.openwebrx-history-speed[data-speed="1"]').click();
-        const offset = Date.now() - wfHistory.playT;
-        const start = Date.now();
-        await new Promise(res => setTimeout(res, 8000));
-        // What the live feed sounded like over time, from the engine's audio history
-        const live = audioEngine.history.map(c => { let s = 0; for (const v of c.pcm) s += v * v; return [c.t, Math.sqrt(s / c.pcm.length)]; });
-        return { offset, start, live, out: window.__audio.filter(x => x[0] > start + 500), replaying: !wfHistory.isLive() && wfHistory.speed === 1 };
-    });
-    assert.ok(r.replaying, 'still replaying');
+// The fake SDR's burst is on during even 3 second periods of wall clock
+// time. Tuned to it in FM, audio is quiet while it is on (a strong carrier)
+// and loud noise while it is off.
+const burstOn = t => Math.floor(t / 3000) % 2 === 0;
+const nearSwitch = t => { const p = t % 3000; return p < 400 || p > 2600; };
 
-    // Level (dB) of the live feed at a given time, from 16bit samples
-    const levelAt = t => {
-        let v = null;
-        for (const x of r.live) { if (x[0] <= t) v = x[1]; else break; }
-        return v === null ? null : 20 * Math.log10(v / 32768 + 1e-9);
-    };
-    let n = 0, recorded = 0, live = 0;
-    for (const [t, rms] of r.out) {
-        const out = 20 * Math.log10(rms + 1e-9);
-        const then = levelAt(t - r.offset), now = levelAt(t);
-        if (then === null || now === null) continue;
+// Compare audio loudness over time with the burst's state AGE ms earlier
+// and at the same time. Returns percentages of matching audio buffers.
+function followsBurst(out, age) {
+    let n = 0, past = 0, live = 0;
+    for (const [t, rms] of out) {
+        if (nearSwitch(t - age) || nearSwitch(t)) continue;
+        const quiet = rms < 0.05;
         n++;
-        if (Math.abs(out - then) < 3) recorded++;
-        if (Math.abs(out - now) < 3) live++;
+        if (quiet === burstOn(t - age)) past++;
+        if (quiet === burstOn(t)) live++;
     }
-    const pct = x => Math.round(100 * x / n) + '%';
-    console.log('# replayed audio within 3dB of recorded: ' + pct(recorded) + ', of live: ' + pct(live) + ' (' + n + ' buffers)');
-    assert.ok(n > 40, 'compared ' + n + ' buffers');
-    assert.ok(recorded / n >= 0.9, 'within 3dB of the recorded audio only ' + pct(recorded));
-    assert.ok(live / n <= 0.6, 'within 3dB of the live audio ' + pct(live));
+    return { n, past: 100 * past / n, live: 100 * live / n };
+}
+
+// Click the waterfall at the given frequency, like a user tuning there
+async function clickWaterfall(page, freq) {
+    const box = await page.locator('#webrx-canvas-container').boundingBox();
+    const x = await page.evaluate(f => (f - (center_freq - bandwidth / 2)) / bandwidth, freq);
+    await page.mouse.click(box.x + x * box.width, box.y + 100);
+}
+
+test('while replaying, tune anywhere and hear that frequency as it was then', async () => {
+    const page = await h.openReceiver(browser);
+    // Listen live to the steady carrier only, never to the burst
+    await page.evaluate(f => { UI.setModulation('nfm'); UI.setFrequency(f, false); }, h.CARRIER);
+    await page.waitForTimeout(15000);
+    // About 9 seconds back (with latency): 1.5 periods of the burst, so
+    // the past and live burst are in opposite states and easy to tell apart
+    await page.evaluate(() => wfHistory.skip(-8.5));
+    await page.click('.openwebrx-history-speed[data-speed="1"]');
+    await page.waitForFunction(() => wfHistory.serverReplay === 'active', null, { timeout: 5000 });
+    assert.match((await h.historyState(page)).badge, /tune anywhere/);
+    // Now tune to the burst by clicking it on the waterfall
+    await clickWaterfall(page, h.BURST);
+    const tuned = await page.evaluate(() => UI.getFrequency());
+    assert.ok(Math.abs(tuned - h.BURST) < 3000, 'tuned to ' + tuned);
+    const age = await page.evaluate(() => Date.now() - wfHistory.playT);
+    const start = await page.evaluate(() => Date.now());
+    await page.waitForTimeout(8000);
+    const out = await page.evaluate(start => window.__audio.filter(x => x[0] > start + 1000), start);
+    const r = followsBurst(out, age);
+    console.log('# tune anywhere: audio follows the burst as it was ' + (age / 1000).toFixed(1) + 's ago: ' + Math.round(r.past) + '%, live: ' + Math.round(r.live) + '% (' + r.n + ' buffers)');
+    assert.ok(r.n > 30, 'compared ' + r.n + ' buffers');
+    assert.ok(r.past >= 90, 'follows the past burst only ' + Math.round(r.past) + '%');
+    assert.ok(r.live <= 60, 'follows the live burst ' + Math.round(r.live) + '%');
+    assert.ok(!(await h.historyState(page)).live, 'still replaying');
+    // Back to live: audio follows the live burst again
+    await page.click('.openwebrx-live-button');
+    const liveStart = await page.evaluate(() => Date.now());
+    await page.waitForTimeout(6000);
+    const liveOut = await page.evaluate(start => window.__audio.filter(x => x[0] > start + 1000), liveStart);
+    const l = followsBurst(liveOut, age);
+    assert.ok(l.live >= 90, 'after LIVE, follows the live burst only ' + Math.round(l.live) + '%');
+    assert.deepStrictEqual(page.errors, []);
+    await page.close();
+});
+
+test('beyond the IQ buffer, playback falls back to the recorded audio of the tuned frequency', async () => {
+    const page = await h.openReceiver(browser);
+    await page.evaluate(f => { UI.setModulation('nfm'); UI.setFrequency(f, false); }, h.BURST);
+    await page.waitForTimeout(20000);
+    // 15 seconds back is older than the server's 12 second IQ buffer
+    await page.evaluate(() => wfHistory.skip(-15));
+    await page.click('.openwebrx-history-speed[data-speed="1"]');
+    await page.waitForFunction(() => wfHistory.serverReplay === 'failed', null, { timeout: 5000 });
+    assert.match((await h.historyState(page)).badge, /tuned frequency only/);
+    const age = await page.evaluate(() => Date.now() - wfHistory.playT);
+    const start = await page.evaluate(() => Date.now());
+    await page.waitForTimeout(8000);
+    const out = await page.evaluate(start => window.__audio.filter(x => x[0] > start + 1000), start);
+    const r = followsBurst(out, age);
+    console.log('# fallback: audio follows the burst as it was ' + (age / 1000).toFixed(1) + 's ago: ' + Math.round(r.past) + '%, live: ' + Math.round(r.live) + '% (' + r.n + ' buffers)');
+    assert.ok(r.n > 30, 'compared ' + r.n + ' buffers');
+    assert.ok(r.past >= 90, 'follows the recorded burst only ' + Math.round(r.past) + '%');
+    assert.ok(r.live <= 60, 'follows the live burst ' + Math.round(r.live) + '%');
     assert.deepStrictEqual(page.errors, []);
     await page.close();
 });

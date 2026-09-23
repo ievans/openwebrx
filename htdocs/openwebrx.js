@@ -1141,6 +1141,9 @@ function on_ws_recv(evt) {
                     case 'iq_saved':
                         UI.setIqSavedStatus(json['value']);
                         break;
+                    case 'replay':
+                        wfHistory.onReplayStatus(json['value']);
+                        break;
                     case 'log_message':
                         divlog(json['value'], true);
                         break;

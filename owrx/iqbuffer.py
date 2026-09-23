@@ -6,6 +6,7 @@ from collections import deque
 from datetime import datetime, timezone
 
 import threading
+import time
 import os
 
 import logging
@@ -52,7 +53,9 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
         self.users      = 0
         self.lock       = threading.Lock()
         self.saveLock   = threading.Lock()
-        self.chunks     = deque()   # (datetime, center_freq, bytes)
+        # Chunk = (datetime, center_freq, bytes, monotonic time, sequence number)
+        self.chunks     = deque()
+        self.seq        = 0         # sequence number of the next chunk
         self.size       = 0
         self.sampleRate = 0
         self.reader     = None
@@ -115,10 +118,43 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
             cf = self.sdrSource.getProps()["center_freq"]
             maxBytes = self.getMaxBytes()
             with self.lock:
-                self.chunks.append((datetime.now(timezone.utc), cf, data))
+                self.chunks.append((datetime.now(timezone.utc), cf, data, time.monotonic(), self.seq))
+                self.seq += 1
                 self.size += len(data)
                 while self.chunks and self.size > maxBytes:
                     self.size -= len(self.chunks.popleft()[2])
+
+    # Find the chunk holding the samples received the given number of
+    # seconds ago. Returns its sequence number, or None if not buffered.
+    def findChunk(self, age: float):
+        target = time.monotonic() - age
+        with self.lock:
+            if not self.chunks:
+                return None
+            # A chunk's time is when its last sample arrived, so allow the
+            # first chunk to cover a little time before it
+            first = self.chunks[0]
+            if target < first[3] - len(first[2]) / IqRecorder.BYTES_PER_SAMPLE / max(self.sampleRate, 1):
+                return None
+            lo, hi = 0, len(self.chunks) - 1
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if self.chunks[mid][3] < target:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            return self.chunks[lo][4]
+
+    # Get chunk by its sequence number. Returns None if it has not arrived
+    # yet, raises LookupError if it has already been dropped.
+    def getChunk(self, seq: int):
+        with self.lock:
+            if not self.chunks or seq > self.chunks[-1][4]:
+                return None
+            index = seq - self.chunks[0][4]
+            if index < 0:
+                raise LookupError("IQ data no longer buffered")
+            return self.chunks[index]
 
     # Save up to the given number of most recent seconds into a new
     # SigMF recording. Returns status dictionary.
@@ -159,7 +195,7 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
         try:
             with Storage.getSharedInstance().newFile(fileName) as f:
                 dataPath = f.name
-                for i, (timestamp, cf, data) in enumerate(chunks):
+                for i, (timestamp, cf, data, _, _) in enumerate(chunks):
                     if i == 0 and excess > 0:
                         data = data[excess:]
                     if not captures or captures[-1]["core:frequency"] != cf:
