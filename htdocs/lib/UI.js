@@ -26,6 +26,7 @@ UI.sections = {
     'modes'   : true,
     'controls': true,
     'scan'    : false,
+    'replay'  : false,
     'settings': false,
     'display' : true
 };
@@ -44,7 +45,8 @@ UI.loadSettings = function() {
     this.setNR(LS.has('nr_threshold')? LS.loadInt('nr_threshold') : 0);
     this.toggleNR(LS.has('nr_enabled')? LS.loadBool('nr_enabled') : false);
     this.setSpikeSnr(LS.has('spike_snr')? LS.loadInt('spike_snr') : 12);
-    this.setSpikeAutoTune(LS.has('spike_autotune')? LS.loadBool('spike_autotune') : true);
+    // Spike scanner always starts out tuning to new signals
+    this.setSpikeAutoTune(true);
 
     // Toggle UI sections
     for (section in this.sections) {
@@ -447,7 +449,6 @@ UI.clearSpikeLockouts = function() {
 UI.setSpikeAutoTune = function(on) {
     spikeScanner.setAutoTune(on);
     $('#openwebrx-spike-autotune').prop('checked', !!on);
-    LS.save('spike_autotune', !!on);
 };
 
 UI.clearSpikeLog = function() {

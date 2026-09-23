@@ -84,6 +84,21 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
     def getMaxBytes(self):
         return int(Config.get()["iq_buffer_seconds"] * self.sampleRate * IqRecorder.BYTES_PER_SAMPLE)
 
+    # Fill level, for display: buffered and maximum seconds and bytes
+    def getStatus(self):
+        maxBytes = self.getMaxBytes()
+        with self.lock:
+            size = self.size
+            rate = self.sampleRate
+        perSecond = rate * IqRecorder.BYTES_PER_SAMPLE
+        return {
+            "seconds": size / perSecond if perSecond else 0,
+            "max_seconds": maxBytes / perSecond if perSecond else 0,
+            "bytes": size,
+            "max_bytes": maxBytes,
+            "samp_rate": rate,
+        }
+
     def getDuration(self):
         with self.lock:
             if not self.sampleRate:
@@ -236,3 +251,51 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
 
     def onDisable(self):
         self._stopReader()
+
+
+#
+# Periodically sends the fill level of their IQ time-shift buffer to
+# interested clients. One thread serves all of them.
+#
+class IqBufferReporter(object):
+    sharedInstance = None
+    creationLock = threading.Lock()
+    INTERVAL = 1.0
+
+    @staticmethod
+    def getSharedInstance():
+        with IqBufferReporter.creationLock:
+            if IqBufferReporter.sharedInstance is None:
+                IqBufferReporter.sharedInstance = IqBufferReporter()
+        return IqBufferReporter.sharedInstance
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.listeners = {}     # callback -> buffer
+        self.thread = None
+
+    # Report status of BUFFER to CALLBACK until removed
+    def add(self, callback, buffer):
+        with self.lock:
+            self.listeners[callback] = buffer
+            if self.thread is None:
+                self.thread = threading.Thread(target=self._run, name="iq-buffer-reporter", daemon=True)
+                self.thread.start()
+
+    def remove(self, callback):
+        with self.lock:
+            self.listeners.pop(callback, None)
+
+    def _run(self):
+        while True:
+            with self.lock:
+                if not self.listeners:
+                    self.thread = None
+                    return
+                listeners = list(self.listeners.items())
+            for callback, buffer in listeners:
+                try:
+                    callback(buffer.getStatus())
+                except Exception:
+                    logger.exception("Exception reporting IQ buffer status")
+            time.sleep(IqBufferReporter.INTERVAL)

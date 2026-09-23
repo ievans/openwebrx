@@ -42,6 +42,7 @@ async function openReceiver(browser) {
             audioEngine.audioBuffers.push = b => { tap(b); return push(b); };
         }
         UI.toggleSection(document.getElementById('openwebrx-section-scan'), true);
+        UI.toggleSection(document.getElementById('openwebrx-section-replay'), true);
     });
     return page;
 }
@@ -74,6 +75,7 @@ function historyState(page) {
         live: wfHistory.isLive(),
         speed: wfHistory.speed,
         pauseLit: $('.openwebrx-history-button').hasClass('highlighted'),
+        playIcon: $('.openwebrx-history-button').text() === '\u25b6',
         liveLit: $('.openwebrx-live-button').hasClass('highlighted'),
         badge: $('#openwebrx-history-overlay').is(':visible') ? $('#openwebrx-history-overlay').text().replace(/\s+/g, ' ').trim() : '',
     }));

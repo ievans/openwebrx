@@ -223,7 +223,9 @@
                     <div class="openwebrx-progressbar" id="openwebrx-bar-battery" data-type="battery" style="display:none;"></div>
                     <div class="openwebrx-progressbar" id="openwebrx-bar-network-speed" data-type="networkspeed"></div>
                     <div class="openwebrx-progressbar" id="openwebrx-bar-server-cpu" data-type="cpu"></div>
+                    <div class="openwebrx-progressbar" id="openwebrx-bar-server-memory" data-type="memory"></div>
                     <div class="openwebrx-progressbar" id="openwebrx-bar-clients" data-type="clients"></div>
+                    <div class="openwebrx-progressbar" id="openwebrx-bar-iq-buffer" data-type="iqbuffer"></div>
                 </div>
             </div>
             <div id="openwebrx-panels-container-right">
@@ -302,13 +304,11 @@
                             <input title="Waterfall maximum level" id="openwebrx-waterfall-color-max" class="openwebrx-panel-slider" type="range" min="-200" max="100" value="50" step="1" onchange="Waterfall.updateColors(1);">
                         </div>
                     </div>
-                    <div id="openwebrx-section-scan" class="openwebrx-section-divider" onclick="UI.toggleSection(this);">&blacktriangle;&nbsp;Scan &amp; Replay</div>
+                    <div id="openwebrx-section-scan" class="openwebrx-section-divider" onclick="UI.toggleSection(this);">&blacktriangle;&nbsp;Scan</div>
                     <div class="openwebrx-section">
                         <div class="openwebrx-panel-line openwebrx-panel-flex-line">
                             <div title="Spike scanner: tune to the strongest signal appearing after the scanner starts (right-click to skip current signal)" class="openwebrx-button openwebrx-tool-button openwebrx-spike-button" onclick="UI.toggleSpikeScanner();" oncontextmenu="UI.lockoutSpike();return false;">SPIKE</div>
                             <div title="Forget all skipped signals" class="openwebrx-button openwebrx-tool-button" onclick="UI.clearSpikeLockouts();">UNSKIP</div>
-                            <div title="Record raw IQ spectrum on the server" class="openwebrx-button openwebrx-tool-button openwebrx-iq-record-button" style="display:none;" onclick="UI.toggleIqRecording();">&#9679;&nbsp;IQ</div>
-                            <div title="Save the last seconds of raw IQ buffered on the server" class="openwebrx-button openwebrx-tool-button openwebrx-iq-save-button" style="display:none;" onclick="UI.saveIqBuffer();">&#9194;&nbsp;SAVE</div>
                         </div>
                         <div class="openwebrx-panel-line openwebrx-panel-flex-line">
                             <span class="openwebrx-tool-label" title="Spike must be this many dB above the noise floor">SNR</span>
@@ -326,24 +326,20 @@
                         <div class="openwebrx-panel-line">
                             <div id="openwebrx-spike-log" class="openwebrx-spike-log" title="Click frequency to tune, click time to show on waterfall" onclick="UI.clickSpikeLog(event);"></div>
                         </div>
+                    </div>
+                    <div id="openwebrx-section-replay" class="openwebrx-section-divider" onclick="UI.toggleSection(this);">&blacktriangle;&nbsp;Replay</div>
+                    <div class="openwebrx-section">
                         <div class="openwebrx-panel-line openwebrx-panel-flex-line">
-                            <div title="Pause waterfall" class="openwebrx-button openwebrx-tool-button openwebrx-history-button" onclick="wfHistory.pause();">&#10074;&#10074;</div>
+                            <div title="Play / pause waterfall and audio" class="openwebrx-button openwebrx-tool-button openwebrx-history-button" onclick="wfHistory.togglePlay();">&#10074;&#10074;</div>
                             <div title="Back 10 seconds" class="openwebrx-button openwebrx-tool-button" onclick="wfHistory.skip(-10);">-10s</div>
                             <div title="Rewind at 4x" class="openwebrx-button openwebrx-tool-button openwebrx-history-speed" data-speed="-4" onclick="wfHistory.setSpeed(-4);">&#9664;&#9664;</div>
-                            <div title="Play at 1x" class="openwebrx-button openwebrx-tool-button openwebrx-history-speed" data-speed="1" onclick="wfHistory.setSpeed(1);">&#9654;</div>
                             <div title="Fast forward at 4x" class="openwebrx-button openwebrx-tool-button openwebrx-history-speed" data-speed="4" onclick="wfHistory.setSpeed(4);">&#9654;&#9654;</div>
                             <div title="Forward 10 seconds" class="openwebrx-button openwebrx-tool-button" onclick="wfHistory.skip(10);">+10s</div>
+                            <div title="Return to live waterfall and audio" class="openwebrx-button openwebrx-tool-button openwebrx-live-button" onclick="wfHistory.goLive();">LIVE</div>
                         </div>
                         <div class="openwebrx-panel-line openwebrx-panel-flex-line">
-                            <div title="Return to live waterfall and audio" class="openwebrx-button openwebrx-tool-button openwebrx-live-button" style="flex:0 0 40px;" onclick="wfHistory.goLive();">LIVE</div>
-                            <input title="Waterfall history position" id="openwebrx-history-slider" class="openwebrx-tool-slider" type="range" min="0" max="1000" value="1000" step="1" oninput="wfHistory.seek(this.value / 1000);">
-                            <select title="Waterfall history length" id="openwebrx-history-length" onchange="wfHistory.setMaxMinutes(this.value);">
-                                <option value="1">1m</option>
-                                <option value="5">5m</option>
-                                <option value="10" selected>10m</option>
-                                <option value="30">30m</option>
-                                <option value="60">60m</option>
-                            </select>
+                            <div title="Record raw IQ spectrum on the server" class="openwebrx-button openwebrx-tool-button openwebrx-iq-record-button" style="display:none;" onclick="UI.toggleIqRecording();">&#9679;&nbsp;IQ</div>
+                            <div title="Save the last seconds of raw IQ buffered on the server" class="openwebrx-button openwebrx-tool-button openwebrx-iq-save-button" style="display:none;" onclick="UI.saveIqBuffer();">&#9194;&nbsp;SAVE</div>
                         </div>
                         <div class="openwebrx-panel-line openwebrx-tool-status">
                             <span id="openwebrx-history-label">LIVE</span>

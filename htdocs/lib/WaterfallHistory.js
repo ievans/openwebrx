@@ -25,25 +25,14 @@ function WaterfallHistory() {
     this.replayId     = 0;
     this.replayError  = null;
     this.replayTimer  = 0;
+    // TRUE when locally remembered audio exists, but for another frequency
+    this.localMismatch = false;
     this.pending  = false;
     this.lastUi   = 0;
-
-    try {
-        var m = parseInt(localStorage.getItem('wf_history_minutes'));
-        if (m > 0) this.maxAge = m * 60 * 1000;
-    } catch (e) {}
 }
 
 WaterfallHistory.prototype.isLive = function() {
     return this.live;
-};
-
-WaterfallHistory.prototype.setMaxMinutes = function(minutes) {
-    this.maxAge = Math.max(1, Number(minutes)) * 60 * 1000;
-    audioEngine.setHistoryMaxAge(this.maxAge);
-    try { localStorage.setItem('wf_history_minutes', '' + minutes); } catch (e) {}
-    this.evict();
-    this.updateUi();
 };
 
 WaterfallHistory.prototype.clear = function() {
@@ -142,23 +131,18 @@ WaterfallHistory.prototype.pause = function() {
     if (this.freeze()) this.setSpeed(0);
 };
 
+// Play/pause button: pauses when live or moving, plays at 1x when paused.
+// It never returns to live, that is what the LIVE button is for.
+WaterfallHistory.prototype.togglePlay = function() {
+    if (this.live || this.speed != 0) this.pause(); else this.setSpeed(1);
+};
+
 WaterfallHistory.prototype.goLive = function() {
     this.setSpeed(0);
     this.live   = true;
     this.cursor = -1;
     this.syncAudio();
     this.redraw(this.frames.length - 1);
-    this.updateUi();
-};
-
-// Seek to a relative position in the buffer (0 = oldest, 1 = newest).
-WaterfallHistory.prototype.seek = function(pos) {
-    if (!this.freeze()) return;
-    this.cursor = Math.round(Math.max(0, Math.min(1, pos)) * (this.frames.length - 1));
-    this.playT  = this.frames[this.cursor].t;
-    this.audioT = null;
-    this.syncAudio(true);
-    this.requestRedraw();
     this.updateUi();
 };
 
@@ -247,7 +231,8 @@ WaterfallHistory.prototype.requestServerReplay = function() {
     var id = ++this.replayId;
     this.serverReplay = 'pending';
     this.replayError = null;
-    // Seeking by dragging the slider moves a lot, only ask once it settles
+    // Seeking repeatedly (e.g. clicking -10s a few times) moves a lot,
+    // only ask once it settles
     clearTimeout(this.replayTimer);
     this.replayTimer = setTimeout(function() {
         if (me.replayId !== id) return;
@@ -304,7 +289,10 @@ WaterfallHistory.prototype.tick = function() {
         // server replays (or is about to replay) the whole spectrum
         if (this.speed == 1) {
             var local = this.serverReplay === 'off' || this.serverReplay === 'failed';
-            if (local && this.audioT !== null) audioEngine.replay(this.audioT, t);
+            if (local && this.audioT !== null) {
+                var r = audioEngine.replay(this.audioT, t);
+                if (r.played || r.skipped) this.localMismatch = !r.played;
+            }
             this.audioT = t;
         }
         // Moving forward: just append new lines to the waterfall
@@ -344,13 +332,16 @@ WaterfallHistory.prototype.updateUi = function() {
     this.lastUi = Date.now();
 
     var $overlay = $('#openwebrx-history-overlay');
-    var $slider  = $('#openwebrx-history-slider');
     var $label   = $('#openwebrx-history-label');
     var $button  = $('.openwebrx-history-button');
     var n = this.frames.length;
 
-    // Pause is lit while stopped in history, LIVE while showing live data
-    $button.toggleClass('highlighted', !this.live && !this.speed);
+    // Play/pause shows what pressing it does, and is lit while paused.
+    // LIVE is lit while showing live data.
+    var moving = this.live || this.speed != 0;
+    $button.html(moving? '&#10074;&#10074;' : '&#9654;');
+    $button.attr('title', moving? 'Pause waterfall and audio' : 'Play at normal speed');
+    $button.toggleClass('highlighted', !moving);
     $('.openwebrx-live-button').toggleClass('highlighted', this.live);
     var speed = this.speed;
     $('.openwebrx-history-speed').each(function() {
@@ -359,7 +350,6 @@ WaterfallHistory.prototype.updateUi = function() {
 
     if (this.live || !n) {
         $overlay.hide();
-        $slider.val(1000);
         $label.text('LIVE ' + this.formatDelta(this.getDuration()).substring(1));
         return;
     }
@@ -369,15 +359,15 @@ WaterfallHistory.prototype.updateUi = function() {
     var text = this.formatDelta(delta) + ' (' + Utils.HHMMSS(f.t) + ' UTC)';
     if (this.speed != 0) text += ' ' + (this.speed > 0? '▶' : '◀') + Math.abs(this.speed) + 'x';
 
-    // Do not fight the user dragging the slider
-    if (!$slider.is(':active')) {
-        $slider.val(n > 1? Math.round(1000 * this.cursor / (n - 1)) : 1000);
-    }
     $label.text(text);
+    // Explain why the server does not replay the whole spectrum
+    var reason = !this.canReplayOnServer()? 'IQ time-shift buffer is off on the server'
+        : this.replayError || '';
     var audio = this.speed != 1? 'audio paused'
         : this.serverReplay === 'active'? 'replaying audio, tune anywhere'
         : this.serverReplay === 'pending'? 'loading audio'
-        : 'replaying audio of tuned frequency only';
+        : (this.localMismatch? 'no recorded audio at this frequency'
+            : 'replaying audio of tuned frequency only') + (reason? ' (' + reason + ')' : '');
     $overlay.find('.openwebrx-history-overlay-text').text('REPLAY ' + text + ' \u00b7 ' + audio);
     $overlay.show();
 };

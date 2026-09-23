@@ -67,6 +67,7 @@ class CpuUsageThread(threading.Thread):
     def run(self):
         logger.debug("cpu usage thread starting up")
         while self.doRun:
+            memory = self.get_memory()
             try:
                 cpu_usage = self.get_cpu_usage()
                 temperature = self.get_temperature()
@@ -81,6 +82,8 @@ class CpuUsageThread(threading.Thread):
             for c in self.clients:
                 c.write_temperature(temperature)
                 c.write_cpu_usage(cpu_usage)
+                if memory is not None:
+                    c.write_memory(memory)
                 if voltage > 0.0:
                     c.write_battery({
                         "voltage": voltage,
@@ -90,6 +93,20 @@ class CpuUsageThread(threading.Thread):
                     })
             self.endEvent.wait(timeout=3)
         logger.debug("cpu usage thread shut down")
+
+    # System memory in use and total, in bytes, or None if unknown
+    def get_memory(self):
+        try:
+            info = {}
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    key, value = line.split(":", 1)
+                    info[key] = int(value.split()[0]) * 1024
+            total = info["MemTotal"]
+            available = info.get("MemAvailable", info.get("MemFree", 0))
+            return {"used": total - available, "total": total}
+        except Exception:
+            return None
 
     def get_temperature(self):
         # Must have temperature file

@@ -176,7 +176,60 @@ BatteryProgressBar.prototype.setBattery = function(battery) {
     );
 };
 
+// Server memory use, warns when it gets high (e.g. from IQ buffers)
+MemoryProgressBar = function(el) {
+    ProgressBar.call(this, el);
+};
+
+MemoryProgressBar.prototype = new ProgressBar();
+
+MemoryProgressBar.prototype.getDefaultText = function() {
+    return 'Server memory';
+};
+
+MemoryProgressBar.prototype.setMemory = function(memory) {
+    var used = memory.total? memory.used / memory.total : 0;
+    var gb = function(b) { return (b / 1073741824).toFixed(1); };
+    this.set(used,
+        'Server memory [' + Math.round(100 * used) + '% ' + gb(memory.used) + '/' + gb(memory.total) + 'GB]',
+        used > .85
+    );
+};
+
+// Fill level of the server's IQ time-shift buffer, which allows tuning
+// anywhere while replaying the waterfall history.
+IqBufferProgressBar = function(el) {
+    ProgressBar.call(this, el);
+};
+
+IqBufferProgressBar.prototype = new ProgressBar();
+
+IqBufferProgressBar.prototype.getDefaultText = function() {
+    return 'IQ buffer [off]';
+};
+
+IqBufferProgressBar.prototype.setOff = function() {
+    this.set(0, 'IQ buffer [off]', false);
+    this.$el.attr('title', 'IQ time-shift buffer is off. An admin can set its length ' +
+        'under Settings > General. It lets you tune anywhere while replaying the waterfall.');
+};
+
+IqBufferProgressBar.prototype.setStatus = function(status) {
+    var max = status.max_seconds || 0;
+    var fill = max? status.seconds / max : 0;
+    var mb = function(b) { return Math.round(b / 1048576) + 'MB'; };
+    this.set(fill,
+        'IQ buffer [' + Math.round(100 * fill) + '% ' + Math.round(status.seconds) + '/' + Math.round(max) + 's]',
+        false
+    );
+    this.$el.attr('title', 'IQ time-shift buffer: ' + Math.round(status.seconds) + ' of ' + Math.round(max) +
+        ' seconds at ' + (status.samp_rate / 1e6) + 'MS/s, ' + mb(status.bytes) + ' of ' + mb(status.max_bytes) +
+        ' server memory. Within this time you can tune anywhere while replaying.');
+};
+
 ProgressBar.types = {
+    iqbuffer: IqBufferProgressBar,
+    memory: MemoryProgressBar,
     cpu: CpuProgressBar,
     battery: BatteryProgressBar,
     audiobuffer: AudioBufferProgressBar,

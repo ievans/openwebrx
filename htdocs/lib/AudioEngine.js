@@ -339,7 +339,9 @@ AudioEngine.prototype.pushHdAudio = function(data) {
 AudioEngine.prototype.remember = function(pcm, hd) {
     if (this.historyEnabled === false) return;
     var now = Date.now();
-    this.history.push({ t: now, hd: hd, pcm: pcm });
+    // Remember what the audio was tuned to, so that it is only replayed
+    // when listening to the same frequency and mode
+    this.history.push({ t: now, hd: hd, pcm: pcm, tuning: this.getTuning() });
     this.historyBytes += pcm.byteLength;
     var n = 0;
     while (n < this.history.length - 1 && (
@@ -360,9 +362,19 @@ AudioEngine.prototype.setHistoryMaxAge = function(msec) {
     this.historyMaxAge = msec;
 };
 
-// Play remembered audio that arrived within the (fromT, toT] time range.
+// Tuning (frequency and mode) the audio currently belongs to, or null
+// when unknown. Set tuningProvider to a function returning it.
+AudioEngine.prototype.getTuning = function() {
+    return this.tuningProvider? this.tuningProvider() : null;
+};
+
+// Play remembered audio that arrived within the (fromT, toT] time range,
+// if it was received with the current tuning. Returns the number of
+// chunks played and skipped for having been tuned elsewhere.
 AudioEngine.prototype.replay = function(fromT, toT) {
-    if (!this.audioNode || !this.paused) return;
+    var result = { played: 0, skipped: 0 };
+    if (!this.audioNode || !this.paused) return result;
+    var tuning = this.getTuning();
     var h = this.history;
     // Binary search for the first chunk newer than fromT
     var lo = 0, hi = h.length;
@@ -371,8 +383,14 @@ AudioEngine.prototype.replay = function(fromT, toT) {
         if (h[mid].t <= fromT) lo = mid + 1; else hi = mid;
     }
     for (var i = lo; i < h.length && h[i].t <= toT; ++i) {
-        this.output(h[i].pcm, h[i].hd? this.hdResampler : this.resampler);
+        if (tuning !== null && h[i].tuning !== tuning) {
+            result.skipped++;
+        } else {
+            this.output(h[i].pcm, h[i].hd? this.hdResampler : this.resampler);
+            result.played++;
+        }
     }
+    return result;
 };
 
 // Stop playing live audio (e.g. while replaying waterfall history).

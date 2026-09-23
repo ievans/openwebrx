@@ -152,7 +152,8 @@ class GeneralSettingsController(SettingsFormController):
                     append="seconds",
                     infotext="Keep this many seconds of raw IQ data in memory. Users can then rewind the "
                     + "waterfall and listen anywhere in the spectrum in the past, and save signals that "
-                    + "have already happened (saving needs IQ recording to be allowed). Set to 0 to disable. "
+                    + "have already happened (saving needs IQ recording to be allowed). Default is 30 seconds, "
+                    + "set to 0 to disable. "
                     + "Uses 8 bytes per sample of RAM, i.e. about 19MB per second at 2.4MS/s.",
                     validator=RangeValidator(0, 600),
                 ),

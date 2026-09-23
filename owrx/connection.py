@@ -17,7 +17,7 @@ from owrx.config import Config
 from owrx.waterfall import WaterfallOptions
 from owrx.iqrecorder import IqRecorder
 from owrx.iqreplay import IqReplay, ReplayUnavailable
-from owrx.iqbuffer import IqTimeShiftBuffer
+from owrx.iqbuffer import IqTimeShiftBuffer, IqBufferReporter
 from owrx.websocket import Handler
 from queue import Queue, Full, Empty
 from abc import ABCMeta, abstractmethod
@@ -501,11 +501,13 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         if self.sdr is not None and pm["iq_buffer_seconds"] > 0:
             try:
                 self.iqBuffer = IqTimeShiftBuffer.acquire(self.sdr)
+                IqBufferReporter.getSharedInstance().add(self.write_iq_buffer, self.iqBuffer)
             except Exception:
                 logger.exception("Failed to start IQ time-shift buffer")
 
     def stopIqBuffer(self):
         self.stopReplay()
+        IqBufferReporter.getSharedInstance().remove(self.write_iq_buffer)
         if self.iqBuffer is not None:
             IqTimeShiftBuffer.release(self.iqBuffer)
             self.iqBuffer = None
@@ -644,6 +646,9 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         except ValueError:
             logger.warning("unable to send smeter value: %s", str(level))
 
+    def write_memory(self, memory):
+        self.mp_send({"type": "memory", "value": memory})
+
     def write_cpu_usage(self, usage):
         self.mp_send({"type": "cpuusage", "value": usage})
 
@@ -688,6 +693,10 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
 
     def write_iq_recording(self, status):
         self.send({"type": "iq_recording", "value": status})
+
+    def write_iq_buffer(self, status):
+        # Status updates are not important enough to block on
+        self.mp_send({"type": "iq_buffer", "value": status})
 
     def write_replay(self, status):
         self.send({"type": "replay", "value": status})
