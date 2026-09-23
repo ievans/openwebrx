@@ -1502,6 +1502,7 @@ function openwebrx_init() {
 
     // Create waterfall history for pausing and rewinding
     wfHistory = new WaterfallHistory();
+    audioEngine.setHistoryMaxAge(wfHistory.maxAge);
     $('#openwebrx-history-length').val(wfHistory.maxAge / 60000);
 
     // Create bandplan ribbon display

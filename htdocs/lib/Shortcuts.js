@@ -108,8 +108,8 @@ Shortcuts.init = function(target) {
         <div class="ks-item-kbd">${this.keycap('G')}|${this.keycap('Shift')}+${this.keycap('G')}</div>
       </div>
       <div class="ks-item">
-        <div class="ks-item-txt">pause waterfall / live</div>
-        <div class="ks-item-kbd">${this.keycap('W')}</div>
+        <div class="ks-item-txt">pause waterfall / back to live</div>
+        <div class="ks-item-kbd">${this.keycap('W')}|${this.keycap('End')}</div>
       </div>
       <div class="ks-item">
         <div class="ks-item-txt">waterfall back|forward 10s</div>
@@ -337,8 +337,13 @@ Shortcuts.handleKey = function(event) {
             break;
 
         case 'w':
-            // W: Pause waterfall or return to live
-            wfHistory.toggle();
+            // W: Pause waterfall
+            wfHistory.pause();
+            break;
+
+        case 'end':
+            // END: Return to live waterfall
+            wfHistory.goLive();
             break;
 
         case 'q':

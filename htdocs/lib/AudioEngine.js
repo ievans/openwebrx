@@ -34,6 +34,13 @@ function AudioEngine(maxBufferLength, audioReporter) {
     this.hdRecorder = new AudioRecorder(this.getHdOutputRate(), 128);
     this.recording = false;
     this.lastHd = false;
+
+    // Decoded audio history for replaying along with waterfall history
+    this.history = [];          // { t, hd, pcm: Int16Array }
+    this.historyBytes = 0;
+    this.historyMaxBytes = 64 * 1024 * 1024;
+    this.historyMaxAge = 10 * 60 * 1000;
+    this.paused = false;
 }
 
 AudioEngine.prototype.buildAudioContext = function() {
@@ -285,7 +292,7 @@ AudioEngine.prototype.getSampleRate = function() {
     return this.audioContext.sampleRate;
 };
 
-AudioEngine.prototype.processAudio = function(data, resampler, recorder) {
+AudioEngine.prototype.processAudio = function(data, resampler, recorder, hd) {
     if (!this.audioNode) return;
     this.audioBytes.add(data.byteLength);
     var buffer;
@@ -298,6 +305,14 @@ AudioEngine.prototype.processAudio = function(data, resampler, recorder) {
     if(this.recording) {
         recorder.record(buffer);
     }
+    // Always keep decoding and remembering live audio, but do not play it
+    // while paused (i.e. while replaying history)
+    this.remember(buffer, hd);
+    if (!this.paused) this.output(buffer, resampler);
+};
+
+// Send decoded audio samples to the output.
+AudioEngine.prototype.output = function(buffer, resampler) {
     buffer = resampler.process(buffer);
     if (this.audioNode.port) {
         // AudioWorklets supported
@@ -311,14 +326,53 @@ AudioEngine.prototype.processAudio = function(data, resampler, recorder) {
 }
 
 AudioEngine.prototype.pushAudio = function(data) {
-    this.processAudio(data, this.resampler, this.recorder);
+    this.processAudio(data, this.resampler, this.recorder, false);
     this.lastHd = false;
 };
 
 AudioEngine.prototype.pushHdAudio = function(data) {
-    this.processAudio(data, this.hdResampler, this.hdRecorder);
+    this.processAudio(data, this.hdResampler, this.hdRecorder, true);
     this.lastHd = true;
 }
+
+// Store decoded audio with its arrival time, dropping old audio.
+AudioEngine.prototype.remember = function(pcm, hd) {
+    var now = Date.now();
+    this.history.push({ t: now, hd: hd, pcm: pcm });
+    this.historyBytes += pcm.byteLength;
+    var n = 0;
+    while (n < this.history.length - 1 && (
+        this.historyBytes > this.historyMaxBytes || now - this.history[n].t > this.historyMaxAge
+    )) {
+        this.historyBytes -= this.history[n].pcm.byteLength;
+        ++n;
+    }
+    if (n > 0) this.history.splice(0, n);
+};
+
+AudioEngine.prototype.setHistoryMaxAge = function(msec) {
+    this.historyMaxAge = msec;
+};
+
+// Play remembered audio that arrived within the (fromT, toT] time range.
+AudioEngine.prototype.replay = function(fromT, toT) {
+    if (!this.audioNode || !this.paused) return;
+    var h = this.history;
+    // Binary search for the first chunk newer than fromT
+    var lo = 0, hi = h.length;
+    while (lo < hi) {
+        var mid = (lo + hi) >> 1;
+        if (h[mid].t <= fromT) lo = mid + 1; else hi = mid;
+    }
+    for (var i = lo; i < h.length && h[i].t <= toT; ++i) {
+        this.output(h[i].pcm, h[i].hd? this.hdResampler : this.resampler);
+    }
+};
+
+// Stop playing live audio (e.g. while replaying waterfall history).
+AudioEngine.prototype.setPaused = function(paused) {
+    this.paused = !!paused;
+};
 
 AudioEngine.prototype.setCompression = function(compression) {
     this.compression = compression;
