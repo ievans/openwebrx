@@ -134,6 +134,19 @@ class GeneralSettingsController(SettingsFormController):
                     "Allow users to record received audio",
                 ),
                 CheckboxInput(
+                    "allow_iq_recording",
+                    "Allow users to record raw IQ spectrum on the server",
+                    infotext="Recordings are saved as SigMF files among other stored files. "
+                    + "Raw IQ data takes a lot of space (8 bytes per sample, i.e. about 19MB/s at 2.4MS/s). "
+                    + "When the magic key is set, users have to supply it to record.",
+                ),
+                NumberInput(
+                    "iq_recording_max_mb",
+                    "Maximum IQ recording size",
+                    append="MB",
+                    validator=RangeValidator(1, 65536),
+                ),
+                CheckboxInput(
                     "allow_center_freq_changes",
                     "Allow users to change center frequency",
                 ),

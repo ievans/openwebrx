@@ -25,6 +25,7 @@ UI.opBumped = null;
 UI.sections = {
     'modes'   : true,
     'controls': true,
+    'scan'    : false,
     'settings': false,
     'display' : true
 };
@@ -42,6 +43,7 @@ UI.loadSettings = function() {
     this.setWfTheme(LS.has('wf_theme')? LS.loadStr('wf_theme') : 'default');
     this.setNR(LS.has('nr_threshold')? LS.loadInt('nr_threshold') : 0);
     this.toggleNR(LS.has('nr_enabled')? LS.loadBool('nr_enabled') : false);
+    this.setSpikeSnr(LS.has('spike_snr')? LS.loadInt('spike_snr') : 12);
 
     // Toggle UI sections
     for (section in this.sections) {
@@ -378,6 +380,9 @@ UI.toggleScanner = function(on) {
     // Do not change scanner state if not needed
     if (scanner.isRunning() == on) return;
 
+    // Only one scanner can run at a time
+    if (on) this.toggleSpikeScanner(false);
+
     // Start or stop scanner as needed
     if (on) scanner.start(); else scanner.stop();
 
@@ -391,6 +396,104 @@ UI.toggleScanner = function(on) {
         $scanButton.addClass('highlighted');
     } else {
         $scanButton.removeClass('highlighted');
+    }
+};
+
+//
+// Spike Scanner Controls
+//
+
+UI.toggleSpikeScanner = function(on) {
+    // If no argument given, toggle spike scanner
+    if (typeof(on) === 'undefined') on = !spikeScanner.isRunning();
+
+    // Do not change scanner state if not needed
+    if (spikeScanner.isRunning() == on) return;
+
+    // Only one scanner can run at a time
+    if (on) {
+        this.toggleScanner(false);
+        spikeScanner.start();
+    } else {
+        spikeScanner.stop();
+    }
+
+    // Update UI elements
+    on = spikeScanner.isRunning();
+    var $button = $('.openwebrx-spike-button');
+    $button.css('animation-name', on? 'openwebrx-scan-animation' : '');
+    $button.toggleClass('highlighted', on);
+};
+
+UI.setSpikeSnr = function(snr) {
+    spikeScanner.setSnr(snr);
+    $('#openwebrx-spike-snr').val(snr);
+    $('#openwebrx-spike-snr-value').text(snr + 'dB');
+    LS.save('spike_snr', snr);
+};
+
+UI.lockoutSpike = function() {
+    if (spikeScanner.lockoutCurrent()) {
+        this.showBubble('Skipping this signal');
+    }
+};
+
+UI.clearSpikeLockouts = function() {
+    spikeScanner.clearLockouts();
+    this.showBubble('Skipped signals cleared');
+};
+
+//
+// Server-side IQ Recording Controls
+//
+
+UI.iqRecording = { recording: false, started: 0, timer: 0 };
+
+UI.toggleIqRecording = function(on) {
+    // If no argument given, toggle IQ recording
+    if (typeof(on) === 'undefined') on = !this.iqRecording.recording;
+
+    ws.send(JSON.stringify({
+        "type": "iqrecord",
+        "params": {
+            "action": on? "start" : "stop",
+            "key": this.getDemodulatorPanel().getMagicKey()
+        }
+    }));
+};
+
+// Handle IQ recording status reported by the server.
+UI.setIqRecordingStatus = function(status) {
+    var rec = this.iqRecording;
+    var $button = $('.openwebrx-iq-record-button');
+    var $label = $('#openwebrx-iq-record-label');
+
+    rec.recording = !!status.recording;
+    $button.css('animation-name', rec.recording? 'openwebrx-record-animation' : '');
+
+    if (rec.timer) {
+        clearInterval(rec.timer);
+        rec.timer = 0;
+    }
+
+    if (rec.recording) {
+        rec.started = Date.now();
+        rec.timer = setInterval(function() {
+            var sec = Math.round((Date.now() - rec.started) / 1000);
+            $label.text('IQ ' + Math.floor(sec / 60) + ':' + ('' + (sec % 60)).padStart(2, '0'));
+        }, 1000);
+        $label.text('IQ 0:00');
+    } else {
+        $label.text('');
+    }
+
+    if (status.error) {
+        divlog('IQ recording: ' + status.error, true);
+        this.showBubble('IQ recording: ' + Utils.htmlEscape(status.error));
+    } else if (!rec.recording && status.file) {
+        var mb = Math.round((status.size || 0) / 1024 / 1024);
+        divlog('IQ recording saved to ' + status.file + ' (' + mb + 'MB).');
+        this.showBubble('Saved ' + Utils.htmlEscape(status.file) + ' (' + mb + 'MB)');
     }
 };
 

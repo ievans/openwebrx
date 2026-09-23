@@ -15,6 +15,7 @@ from owrx.property import PropertyStack, PropertyDeleted
 from owrx.modes import Modes, DigitalMode
 from owrx.config import Config
 from owrx.waterfall import WaterfallOptions
+from owrx.iqrecorder import IqRecorder
 from owrx.websocket import Handler
 from queue import Queue, Full, Empty
 from abc import ABCMeta, abstractmethod
@@ -144,6 +145,7 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         "tuning_precision",
         "allow_center_freq_changes",
         "allow_audio_recording",
+        "allow_iq_recording",
         "allow_chat",
         "callsign_url",
         "vessel_url",
@@ -161,6 +163,7 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         self.sdr = None
         self.configSubs = []
         self.bookmarkSub = None
+        self.iqRecorder = None
         self.connectionProperties = {}
 
         # Get initial robot score based on the number of recent connections
@@ -351,6 +354,12 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
                             key   = params["key"] if "key" in params else None
                             if magic == "" or key == magic:
                                 self.sdr.setCenterFreq(freq)
+                elif message["type"] == "iqrecord":
+                    params = message["params"] if "params" in message else {}
+                    if params.get("action") == "start":
+                        self.startIqRecording(params.get("key"))
+                    else:
+                        self.stopIqRecording()
                 elif message["type"] == "connectionproperties":
                     if "params" in message:
                         self.connectionProperties.update(message["params"])
@@ -369,6 +378,39 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
 
         except json.JSONDecodeError:
             logger.warning("message is not json: {0}".format(message))
+
+    def startIqRecording(self, key: str = None):
+        pm = Config.get()
+        if not pm["allow_iq_recording"]:
+            self.write_iq_recording({"recording": False, "error": "IQ recording is disabled"})
+            return
+        # If the magic key is set, only allow recording with a matching key
+        magic = pm["magic_key"]
+        if magic != "" and key != magic:
+            self.write_iq_recording({"recording": False, "error": "Magic key required"})
+            return
+        if self.iqRecorder is not None and self.iqRecorder.running:
+            self.write_iq_recording(self.iqRecorder.getStatus())
+            return
+        if self.sdr is None:
+            self.write_iq_recording({"recording": False, "error": "No SDR selected"})
+            return
+        recorder = IqRecorder(self.sdr, pm["iq_recording_max_mb"] * 1024 * 1024, self.write_iq_recording)
+        try:
+            recorder.start()
+        except Exception as e:
+            self.write_iq_recording({"recording": False, "error": str(e)})
+            return
+        self.iqRecorder = recorder
+        self.write_iq_recording(recorder.getStatus())
+
+    def stopIqRecording(self, notify: bool = True):
+        if self.iqRecorder is not None:
+            # Do not report back to a client that has disconnected
+            if not notify:
+                self.iqRecorder.onStop = None
+            self.iqRecorder.stop()
+            self.iqRecorder = None
 
     def setProfile(self, sdr: str, profile: str, key: str = None):
         # Set new SDR source
@@ -414,6 +456,7 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
             return
 
         self.stopDsp()
+        self.stopIqRecording()
         self.stack.removeLayerByPriority(0)
 
         if self.sdr is not None:
@@ -445,6 +488,7 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         self.write_sdr_error("No SDR Devices available")
 
     def close(self, error: bool = False):
+        self.stopIqRecording(notify=False)
         if self.sdr is not None:
             self.sdr.removeClient(self)
         self.stopDsp()
@@ -530,6 +574,9 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
 
     def write_bands(self, bands):
         self.send({"type": "bands", "value": bands})
+
+    def write_iq_recording(self, status):
+        self.send({"type": "iq_recording", "value": status})
 
     def write_log_message(self, message):
         self.send({"type": "log_message", "value": message})

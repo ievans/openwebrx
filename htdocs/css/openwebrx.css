@@ -2307,3 +2307,58 @@ img.openwebrx-mirror-img
     background-color: #ffffff;
     color: #000000;
 }
+
+/* Scan & Replay tools */
+
+#webrx-canvas-background {
+    position: relative;
+}
+
+.openwebrx-tool-button {
+    flex: 1;
+    height: 19px;
+    font-size: 10pt;
+    text-align: center;
+    white-space: nowrap;
+    margin-right: 4px;
+    animation-duration: 1s;
+    animation-iteration-count: infinite;
+}
+
+.openwebrx-tool-slider {
+    flex: 1;
+    min-width: 0;
+}
+
+.openwebrx-tool-label {
+    font-size: 9pt;
+    padding: 0 4px;
+    white-space: nowrap;
+    align-self: center;
+}
+
+.openwebrx-tool-status {
+    font-size: 9pt;
+    display: flex;
+    justify-content: space-between;
+}
+
+#openwebrx-iq-record-label {
+    color: #ff8080;
+}
+
+#openwebrx-history-overlay {
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 3;
+    padding: 3px 10px;
+    border-radius: 5px;
+    background: rgba(160, 0, 0, 0.8);
+    color: white;
+    font-weight: bold;
+    font-size: 10pt;
+    cursor: pointer;
+    white-space: nowrap;
+}

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class Storage(object):
     sharedInstance = None
     creationLock = threading.Lock()
-    filePattern = r'[A-Z0-9]+-[0-9]+-[0-9]+(-[0-9]+)?(-[0-9]+)?\.(bmp|png|txt|mp3)'
+    filePattern = r'[A-Z0-9]+-[0-9]+-[0-9]+(-[0-9]+)?(-[0-9]+)?\.(bmp|png|txt|mp3|sigmf-data|sigmf-meta)'
 
     # Get shared instance of Storage class
     @staticmethod
