@@ -747,6 +747,11 @@ function canvas_mouseup(evt) {
             UI.setFrequency(UI.getFrequency(get_relative_x(evt)));
             UI.toggleScanner(false);
             UI.toggleSpikeScanner(false);
+            // Clicking further down the live waterfall also jumps back to
+            // that moment and starts playing it, instead of only tuning
+            if (wfHistory.isLive() && !wfHistory.clickSeek(get_relative_y(evt))) {
+                UI.showBubble('No longer in waterfall history');
+            }
         } else {
             canvas_end_drag();
         }
@@ -774,6 +779,11 @@ function get_relative_x(evt) {
     if (relatives.length) relativeX = evt.pageX - relatives[0].offsetLeft;
 
     return relativeX - zoom_offset_px;
+}
+
+// Pixels down from the top of the visible waterfall, where 0 is "now".
+function get_relative_y(evt) {
+    return evt.clientY - canvas_container.getBoundingClientRect().top;
 }
 
 function canvas_mousewheel(evt) {
@@ -987,6 +997,7 @@ function on_ws_recv(evt) {
                         if ('iq_buffer_seconds' in config) {
                             iq_buffer_seconds = config['iq_buffer_seconds'] || 0;
                             if (!iq_buffer_seconds) $('#openwebrx-bar-iq-buffer').progressbar().setOff();
+                            wfHistory.updateBufferMarker();
                         }
 
                         if ('allow_iq_recording' in config || 'iq_buffer_seconds' in config) {
@@ -1447,6 +1458,7 @@ function waterfall_clear() {
 function openwebrx_resize() {
     resize_canvases();
     resize_scale();
+    if (wfHistory) wfHistory.updateBufferMarker();
 }
 
 function initProgressBars() {

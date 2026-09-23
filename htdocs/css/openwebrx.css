@@ -2366,6 +2366,29 @@ img.openwebrx-mirror-img
     white-space: nowrap;
 }
 
+/* Marks how far back the server's IQ buffer reaches, on the live waterfall */
+#openwebrx-iq-buffer-marker {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 0;
+    border-top: 1px dashed rgba(255, 255, 0, 0.7);
+    z-index: 3;
+    pointer-events: none;
+}
+
+#openwebrx-iq-buffer-marker span {
+    position: absolute;
+    right: 4px;
+    top: 2px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #ffff80;
+    font-size: 8pt;
+    white-space: nowrap;
+}
+
 .openwebrx-spike-log {
     max-height: 120px;
     overflow-y: auto;

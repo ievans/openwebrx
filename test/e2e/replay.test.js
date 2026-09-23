@@ -19,6 +19,13 @@ test('play/pause, LIVE, keys and playback control waterfall and audio', async ()
     assert.ok(audible(await h.audioOutput(page)), 'live audio plays');
     assert.ok(await h.waterfallMoving(page), 'live waterfall moves');
 
+    // -10s/+10s must not get stuck paused if it was playing beforehand
+    await page.click('text=-10s');
+    s = await h.historyState(page);
+    assert.ok(!s.live && s.speed === 1, '-10s while live keeps playing: ' + JSON.stringify(s));
+    assert.ok(await h.waterfallMoving(page), 'waterfall keeps moving after -10s');
+    await page.click('.openwebrx-live-button');
+
     await page.click('.openwebrx-history-button');
     s = await h.historyState(page);
     assert.ok(!s.live && s.speed === 0 && s.pauseLit && s.playIcon && !s.liveLit, 'pauses, now showing play: ' + JSON.stringify(s));
@@ -94,12 +101,45 @@ function followsBurst(out, age) {
     return { n, past: 100 * past / n, live: 100 * live / n };
 }
 
-// Click the waterfall at the given frequency, like a user tuning there
-async function clickWaterfall(page, freq) {
+// Click the waterfall at the given frequency, like a user tuning there.
+// y is how far down from the top (i.e. how far back in time) to click.
+async function clickWaterfall(page, freq, y = 100) {
     const box = await page.locator('#webrx-canvas-container').boundingBox();
     const x = await page.evaluate(f => (f - (center_freq - bandwidth / 2)) / bandwidth, freq);
-    await page.mouse.click(box.x + x * box.width, box.y + 100);
+    await page.mouse.click(box.x + x * box.width, box.y + y);
 }
+
+test('clicking the live waterfall rewinds to that moment and plays it', async () => {
+    const page = await h.openReceiver(browser);
+    // Build up enough history that clicking well below the top is safely
+    // within the buffer (fake SDR runs at the default 9 fft fps)
+    await page.waitForTimeout(15000);
+    assert.ok((await h.historyState(page)).live, 'starts live');
+
+    await clickWaterfall(page, h.CARRIER, 80);
+
+    const s = await h.historyState(page);
+    assert.ok(!s.live && s.speed === 1, 'click rewinds and plays: ' + JSON.stringify(s));
+    assert.ok(await h.waterfallMoving(page), 'waterfall keeps moving after the click');
+    const tuned = await page.evaluate(() => UI.getFrequency());
+    assert.ok(Math.abs(tuned - h.CARRIER) < 3000, 'also tunes to the clicked frequency: ' + tuned);
+
+    await page.click('.openwebrx-live-button');
+    assert.deepStrictEqual(page.errors, []);
+    await page.close();
+});
+
+test('the IQ buffer limit is marked on the waterfall once there is enough history', async () => {
+    const page = await h.openReceiver(browser);
+    await page.waitForTimeout(15000);    // more than the 12s IQ buffer configured for this test
+    const marker = await page.evaluate(() => ({
+        visible: $('#openwebrx-iq-buffer-marker').is(':visible'),
+        top: parseFloat($('#openwebrx-iq-buffer-marker').css('top')) || 0,
+    }));
+    assert.ok(marker.visible, 'buffer marker shows once there is more history than the IQ buffer');
+    assert.ok(marker.top > 0, 'marker is placed below the top of the waterfall: ' + JSON.stringify(marker));
+    await page.close();
+});
 
 test('while replaying, tune anywhere and hear that frequency as it was then', async () => {
     const page = await h.openReceiver(browser);

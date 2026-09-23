@@ -153,6 +153,58 @@ test('pause during playback stops there, without returning to live', () => {
     assert.strictEqual(s.h.cursor, cursor, 'must stay where it was paused');
 });
 
+test('skip while live keeps playing, instead of getting stuck paused', () => {
+    const s = setup();
+    s.run(100);
+    assert.ok(s.h.isLive());
+    s.h.skip(-10);
+    assert.ok(!s.h.isLive());
+    assert.strictEqual(s.h.speed, 1, 'keeps playing after skipping back from live');
+});
+
+test('skip while playing back keeps playing, at the same speed', () => {
+    const s = setup();
+    s.run(200);            // 20 seconds of history
+    s.h.skip(-10);         // back to 10s ago, well clear of the live edge
+    s.h.setSpeed(4);
+    s.h.skip(5);           // forward 5s, still short of the live edge
+    assert.strictEqual(s.h.speed, 4, 'keeps playing at the same speed after skip');
+    assert.ok(!s.h.isLive());
+});
+
+test('skip while paused stays paused', () => {
+    const s = setup();
+    s.run(100);
+    s.h.pause();
+    s.h.skip(-5);
+    assert.strictEqual(s.h.speed, 0, 'must stay paused after skip');
+    assert.ok(!s.h.isLive());
+});
+
+test('clicking the live waterfall jumps back to that moment and plays it', () => {
+    const s = setup();
+    s.run(100);            // 10 seconds of history, 100 lines
+    assert.ok(s.h.isLive());
+    assert.ok(s.h.clickSeek(30));
+    assert.ok(!s.h.isLive());
+    assert.strictEqual(s.h.speed, 1, 'starts playing immediately');
+    assert.strictEqual(s.h.cursor, 100 - 1 - 30);
+});
+
+test('clicking right at the top of the live waterfall is just tuning', () => {
+    const s = setup();
+    s.run(100);
+    assert.ok(s.h.clickSeek(2));
+    assert.ok(s.h.isLive(), 'stays live for a click at the very top');
+});
+
+test('clicking below the buffered history is reported as out of range', () => {
+    const s = setup();
+    s.run(10);
+    assert.ok(!s.h.clickSeek(500));
+    assert.ok(s.h.isLive(), 'nothing changes when out of range');
+});
+
 test('fast-forward catches up and returns to live audio', () => {
     const s = setup();
     s.run(50);
