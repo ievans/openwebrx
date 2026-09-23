@@ -1,4 +1,5 @@
 **1.2.124**
+- Renamed "Server memory" status field to "System memory" and fixed its text overflowing on systems with large amounts of RAM.
 - Added plugin APIs for buttons, windows, sections.
 - Added optional pointer frequency display.
 - Added Soapy source for IQ files and streams [f-and].

@@ -695,6 +695,13 @@ img.openwebrx-mirror-img
 	height: 20px;
 }
 
+/* memory readout ("System memory [100% 999/999GB]") is the longest label of the
+   status bars and clips at 200px on systems with 3-digit GB amounts */
+#openwebrx-panel-status div.openwebrx-progressbar#openwebrx-bar-server-memory
+{
+	width: 220px;
+}
+
 #openwebrx-panel-receiver
 {
     width:110px;

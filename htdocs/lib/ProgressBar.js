@@ -176,7 +176,10 @@ BatteryProgressBar.prototype.setBattery = function(battery) {
     );
 };
 
-// Server memory use, warns when it gets high (e.g. from IQ buffers)
+// System memory use, warns when it gets high (e.g. from IQ buffers). Read from
+// /proc/meminfo, so this reflects the host kernel's view of memory, not a
+// figure scoped to the OpenWebRX process (e.g. the whole host when running
+// in a container without its own memory cgroup limits).
 MemoryProgressBar = function(el) {
     ProgressBar.call(this, el);
 };
@@ -184,14 +187,14 @@ MemoryProgressBar = function(el) {
 MemoryProgressBar.prototype = new ProgressBar();
 
 MemoryProgressBar.prototype.getDefaultText = function() {
-    return 'Server memory';
+    return 'System memory';
 };
 
 MemoryProgressBar.prototype.setMemory = function(memory) {
     var used = memory.total? memory.used / memory.total : 0;
-    var gb = function(b) { return (b / 1073741824).toFixed(1); };
+    var gb = function(b) { return Math.round(b / 1073741824); };
     this.set(used,
-        'Server memory [' + Math.round(100 * used) + '% ' + gb(memory.used) + '/' + gb(memory.total) + 'GB]',
+        'System memory [' + Math.round(100 * used) + '% ' + gb(memory.used) + '/' + gb(memory.total) + 'GB]',
         used > .85
     );
 };
@@ -224,7 +227,7 @@ IqBufferProgressBar.prototype.setStatus = function(status) {
     );
     this.$el.attr('title', 'IQ time-shift buffer: ' + Math.round(status.seconds) + ' of ' + Math.round(max) +
         ' seconds at ' + (status.samp_rate / 1e6) + 'MS/s, ' + mb(status.bytes) + ' of ' + mb(status.max_bytes) +
-        ' server memory. Within this time you can tune anywhere while replaying.');
+        ' system memory. Within this time you can tune anywhere while replaying.');
 };
 
 ProgressBar.types = {
