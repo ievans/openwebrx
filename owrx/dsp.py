@@ -517,6 +517,9 @@ class DspManager(SdrSourceEventClient, ClientDemodulatorSecondaryDspEventClient)
 
         self.readers = {}
 
+        # Input reader replacing the live SDR data (e.g. IQ replay), or None
+        self.inputReader = None
+
         mode = None
         if "start_mod" in self.props:
             mode = Modes.findByModulation(self.props["start_mod"])
@@ -883,9 +886,18 @@ class DspManager(SdrSourceEventClient, ClientDemodulatorSecondaryDspEventClient)
 
     def start(self):
         if self.sdrSource.isAvailable():
-            self.chain.setReader(self.sdrSource.getBuffer().getReader())
+            self.chain.setReader(self.inputReader or self.sdrSource.getBuffer().getReader())
         else:
             self.startOnAvailable = True
+
+    # Feed the demodulator from the given reader instead of the live SDR
+    # data, or return to live data if reader is None.
+    def setInputReader(self, reader=None):
+        self.inputReader = reader
+        if reader is not None:
+            self.chain.setReader(reader)
+        elif self.sdrSource.isAvailable():
+            self.chain.setReader(self.sdrSource.getBuffer().getReader())
 
     def unwireOutput(self, t: str):
         if t in self.readers:
@@ -964,7 +976,7 @@ class DspManager(SdrSourceEventClient, ClientDemodulatorSecondaryDspEventClient)
         if state is SdrSourceState.RUNNING:
             logger.debug("received STATE_RUNNING, attempting DspSource restart")
             if self.startOnAvailable:
-                self.chain.setReader(self.sdrSource.getBuffer().getReader())
+                self.chain.setReader(self.inputReader or self.sdrSource.getBuffer().getReader())
                 self.startOnAvailable = False
         elif state is SdrSourceState.STOPPING:
             logger.debug("received STATE_STOPPING, shutting down DspSource")

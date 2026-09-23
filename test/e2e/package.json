@@ -1,0 +1,7 @@
+{
+    "private": true,
+    "description": "End-to-end browser tests for OpenWebRX+, see run.sh",
+    "dependencies": {
+        "playwright": "1.56.1"
+    }
+}

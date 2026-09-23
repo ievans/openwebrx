@@ -18,6 +18,13 @@ function WaterfallHistory() {
     this.timer    = 0;
     this.lastTick = 0;
     this.playT    = 0;      // playback clock, in msec timestamps
+    this.audioT   = null;   // playback clock position of last replayed audio
+    // Server side IQ replay: 'off', 'pending', 'active' or 'failed' (when the
+    // server can not replay, only locally remembered audio is played)
+    this.serverReplay = 'off';
+    this.replayId     = 0;
+    this.replayError  = null;
+    this.replayTimer  = 0;
     this.pending  = false;
     this.lastUi   = 0;
 
@@ -33,6 +40,7 @@ WaterfallHistory.prototype.isLive = function() {
 
 WaterfallHistory.prototype.setMaxMinutes = function(minutes) {
     this.maxAge = Math.max(1, Number(minutes)) * 60 * 1000;
+    audioEngine.setHistoryMaxAge(this.maxAge);
     try { localStorage.setItem('wf_history_minutes', '' + minutes); } catch (e) {}
     this.evict();
     this.updateUi();
@@ -124,6 +132,8 @@ WaterfallHistory.prototype.freeze = function() {
     if (this.live && this.frames.length) {
         this.live   = false;
         this.cursor = this.frames.length - 1;
+        // Live audio does not match the replayed waterfall, silence it
+        this.updateAudio();
     }
     return !this.live;
 };
@@ -136,12 +146,9 @@ WaterfallHistory.prototype.goLive = function() {
     this.setSpeed(0);
     this.live   = true;
     this.cursor = -1;
+    this.syncAudio();
     this.redraw(this.frames.length - 1);
     this.updateUi();
-};
-
-WaterfallHistory.prototype.toggle = function() {
-    if (this.live) this.pause(); else this.goLive();
 };
 
 // Seek to a relative position in the buffer (0 = oldest, 1 = newest).
@@ -149,6 +156,8 @@ WaterfallHistory.prototype.seek = function(pos) {
     if (!this.freeze()) return;
     this.cursor = Math.round(Math.max(0, Math.min(1, pos)) * (this.frames.length - 1));
     this.playT  = this.frames[this.cursor].t;
+    this.audioT = null;
+    this.syncAudio(true);
     this.requestRedraw();
     this.updateUi();
 };
@@ -159,9 +168,11 @@ WaterfallHistory.prototype.skip = function(seconds) {
     var t = this.frames[this.cursor].t + seconds * 1000;
     this.cursor = this.indexAt(t);
     this.playT  = this.frames[this.cursor].t;
+    this.audioT = null;
     if (this.cursor >= this.frames.length - 1 && seconds > 0) {
         this.goLive();
     } else {
+        this.syncAudio(true);
         this.requestRedraw();
         this.updateUi();
     }
@@ -176,6 +187,7 @@ WaterfallHistory.prototype.seekTime = function(t, after = 3) {
     this.setSpeed(0);
     this.cursor = this.indexAt(t + after * 1000);
     this.playT  = this.frames[this.cursor].t;
+    this.audioT = null;
     this.requestRedraw();
     this.updateUi();
     return true;
@@ -203,9 +215,76 @@ WaterfallHistory.prototype.setSpeed = function(speed) {
         var me = this;
         this.lastTick = Date.now();
         this.playT    = this.frames[this.cursor].t;
+        this.audioT   = null;
         this.timer = setInterval(function() { me.tick(); }, 40);
     }
+    this.syncAudio(true);
     this.updateUi();
+};
+
+// Server side IQ replay lets the user tune anywhere while listening to
+// the past. It needs the server's IQ time-shift buffer to be enabled.
+WaterfallHistory.prototype.canReplayOnServer = function() {
+    return typeof iq_buffer_seconds !== 'undefined' && iq_buffer_seconds > 0;
+};
+
+// Pick the audio source for the current state: live audio when live,
+// server IQ replay (or else locally remembered audio) when playing back
+// at normal speed, and silence otherwise. RESTART requests server replay
+// from the current position again, e.g. after seeking.
+WaterfallHistory.prototype.syncAudio = function(restart = false) {
+    var want = !this.live && this.speed == 1 && this.canReplayOnServer();
+    if (want && (restart || this.serverReplay === 'off')) {
+        this.requestServerReplay();
+    } else if (!want && this.serverReplay !== 'off') {
+        this.stopServerReplay();
+    }
+    this.updateAudio();
+};
+
+WaterfallHistory.prototype.requestServerReplay = function() {
+    var me = this;
+    var id = ++this.replayId;
+    this.serverReplay = 'pending';
+    this.replayError = null;
+    // Seeking by dragging the slider moves a lot, only ask once it settles
+    clearTimeout(this.replayTimer);
+    this.replayTimer = setTimeout(function() {
+        if (me.replayId !== id) return;
+        ws.send(JSON.stringify({
+            type: 'replay',
+            params: { action: 'start', id: id, age_ms: Math.max(0, Date.now() - me.playT) }
+        }));
+    }, 150);
+};
+
+WaterfallHistory.prototype.stopServerReplay = function() {
+    clearTimeout(this.replayTimer);
+    ++this.replayId;
+    this.serverReplay = 'off';
+    ws.send(JSON.stringify({ type: 'replay', params: { action: 'stop' } }));
+};
+
+// Handle server's answer to a replay request, or replay ending by itself.
+WaterfallHistory.prototype.onReplayStatus = function(status) {
+    if (status.id !== this.replayId || this.serverReplay === 'off') return;
+    if (status.active) {
+        this.serverReplay = 'active';
+    } else {
+        // Continue with locally remembered audio of the tuned frequency
+        this.serverReplay = 'failed';
+        this.replayError = status.error;
+    }
+    this.updateAudio();
+    this.updateUi();
+};
+
+WaterfallHistory.prototype.updateAudio = function() {
+    var server = this.serverReplay === 'active' && !this.live && this.speed == 1;
+    // Server replay comes in as a normal audio stream, so play it,
+    // but do not remember it as live audio
+    audioEngine.setPaused(!this.live && !server);
+    audioEngine.setHistoryEnabled(!server);
 };
 
 WaterfallHistory.prototype.tick = function() {
@@ -220,6 +299,13 @@ WaterfallHistory.prototype.tick = function() {
         if (t >= this.frames[this.frames.length - 1].t) {
             this.goLive();
             return;
+        }
+        // Replay locally remembered audio at normal speed, unless the
+        // server replays (or is about to replay) the whole spectrum
+        if (this.speed == 1) {
+            var local = this.serverReplay === 'off' || this.serverReplay === 'failed';
+            if (local && this.audioT !== null) audioEngine.replay(this.audioT, t);
+            this.audioT = t;
         }
         // Moving forward: just append new lines to the waterfall
         var next = this.indexAt(t);
@@ -263,7 +349,9 @@ WaterfallHistory.prototype.updateUi = function() {
     var $button  = $('.openwebrx-history-button');
     var n = this.frames.length;
 
-    $button.toggleClass('highlighted', !this.live);
+    // Pause is lit while stopped in history, LIVE while showing live data
+    $button.toggleClass('highlighted', !this.live && !this.speed);
+    $('.openwebrx-live-button').toggleClass('highlighted', this.live);
     var speed = this.speed;
     $('.openwebrx-history-speed').each(function() {
         $(this).toggleClass('highlighted', !!speed && Number(this.dataset.speed) == speed);
@@ -286,6 +374,10 @@ WaterfallHistory.prototype.updateUi = function() {
         $slider.val(n > 1? Math.round(1000 * this.cursor / (n - 1)) : 1000);
     }
     $label.text(text);
-    $overlay.find('.openwebrx-history-overlay-text').text('REPLAY ' + text);
+    var audio = this.speed != 1? 'audio paused'
+        : this.serverReplay === 'active'? 'replaying audio, tune anywhere'
+        : this.serverReplay === 'pending'? 'loading audio'
+        : 'replaying audio of tuned frequency only';
+    $overlay.find('.openwebrx-history-overlay-text').text('REPLAY ' + text + ' \u00b7 ' + audio);
     $overlay.show();
 };

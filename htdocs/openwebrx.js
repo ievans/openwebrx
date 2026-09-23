@@ -1141,6 +1141,9 @@ function on_ws_recv(evt) {
                     case 'iq_saved':
                         UI.setIqSavedStatus(json['value']);
                         break;
+                    case 'replay':
+                        wfHistory.onReplayStatus(json['value']);
+                        break;
                     case 'log_message':
                         divlog(json['value'], true);
                         break;
@@ -1502,6 +1505,7 @@ function openwebrx_init() {
 
     // Create waterfall history for pausing and rewinding
     wfHistory = new WaterfallHistory();
+    audioEngine.setHistoryMaxAge(wfHistory.maxAge);
     $('#openwebrx-history-length').val(wfHistory.maxAge / 60000);
 
     // Create bandplan ribbon display

@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+#
+# Fake "perseustest" for end-to-end tests: writes synthetic complex float32
+# IQ samples to stdout in real time, so OpenWebRX+ can run without an SDR.
+#
+# Relative to the center frequency, the spectrum contains:
+#   +30 kHz  a steady carrier (amplitude 0.05, -26 dBFS)
+#   -60 kHz  a carrier switching on and off every 3 seconds of wall clock
+#            time (amplitude 0.2, -14 dBFS), on during even 3s periods
+#   noise    everywhere else
+#
+# Samples are precomputed in 50ms blocks holding a whole number of cycles
+# of both tones, so that output stays phase-continuous and cheap to produce.
+#
+import array
+import math
+import random
+import sys
+import time
+
+RATE = 250000
+if "-s" in sys.argv:
+    RATE = int(sys.argv[sys.argv.index("-s") + 1])
+BLOCK = RATE // 20
+
+
+def make_block(burst: bool, seed: int):
+    rnd = random.Random(seed)
+    a = array.array("f")
+    for i in range(BLOCK):
+        re = rnd.gauss(0, 0.01)
+        im = rnd.gauss(0, 0.01)
+        p = 2 * math.pi * 30000 * i / RATE
+        re += 0.05 * math.cos(p)
+        im += 0.05 * math.sin(p)
+        if burst:
+            p = -2 * math.pi * 60000 * i / RATE
+            re += 0.2 * math.cos(p)
+            im += 0.2 * math.sin(p)
+        a.append(re)
+        a.append(im)
+    return a.tobytes()
+
+
+blocks = {on: [make_block(on, seed) for seed in range(8)] for on in (False, True)}
+out = sys.stdout.buffer
+start = time.time()
+count = 0
+try:
+    while True:
+        on = int(time.time() / 3) % 2 == 0
+        out.write(blocks[on][count % 8])
+        out.flush()
+        count += 1
+        ahead = count * BLOCK / RATE - (time.time() - start)
+        if ahead > 0:
+            time.sleep(ahead)
+except (BrokenPipeError, KeyboardInterrupt):
+    pass
