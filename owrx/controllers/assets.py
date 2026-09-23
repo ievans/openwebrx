@@ -2,6 +2,7 @@ from . import Controller
 from owrx.config.core import CoreConfig
 from datetime import datetime, timezone
 import mimetypes
+import re
 import os
 import importlib.resources
 from abc import ABCMeta, abstractmethod
@@ -79,7 +80,11 @@ class AssetsController(GzipMixin, ModificationAwareController, metaclass=ABCMeta
 
             if content_type is None:
                 (content_type, encoding) = mimetypes.guess_type(self.getFilePath(file))
-            self.send_response(data, content_type=content_type, last_modified=modified, max_age=3600)
+            # Scripts and styles must match the (uncached) HTML pages that use
+            # them, so make browsers revalidate them on every load (cheap, as
+            # unchanged files get "304 Not Modified")
+            max_age = 0 if re.match(r".*\.(js|css)$", file) else 3600
+            self.send_response(data, content_type=content_type, last_modified=modified, max_age=max_age)
         except FileNotFoundError:
             self.send_response("file not found", code=404)
 
@@ -219,7 +224,9 @@ class CompiledAssetsController(GzipMixin, ModificationAwareController):
         contents = [self.getContents(f) for f in files]
 
         (content_type, encoding) = mimetypes.guess_type(profileName)
-        self.send_response("\n".join(contents), content_type=content_type, last_modified=modified, max_age=3600)
+        # Revalidate on every load, so that the page never runs stale code
+        # after an update (unchanged files get cheap "304 Not Modified")
+        self.send_response("\n".join(contents), content_type=content_type, last_modified=modified, max_age=0)
 
     def getContents(self, file):
         with open(file) as f:
