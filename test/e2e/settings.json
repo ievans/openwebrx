@@ -1,0 +1,22 @@
+{
+    "version": 8,
+    "sdrs": {
+        "fake": {
+            "name": "Fake SDR",
+            "type": "perseussdr",
+            "profiles": {
+                "test": {
+                    "name": "Test",
+                    "center_freq": 145000000,
+                    "samp_rate": 250000,
+                    "start_freq": 145000000,
+                    "start_mod": "nfm",
+                    "tuning_step": "1000"
+                }
+            }
+        }
+    },
+    "allow_iq_recording": true,
+    "iq_buffer_seconds": 5,
+    "magic_key": ""
+}

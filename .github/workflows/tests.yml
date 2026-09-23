@@ -1,0 +1,63 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # csdr and pycsdr versions the tests were verified with
+      CSDR_REF: 59cf6dd113f9e09b48ffcab2813c2c0051ffd211
+      PYCSDR_REF: 42a5ab3ca48953e65441c4ed7fbd63f030f5afa8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libfftw3-dev libsamplerate0-dev
+
+      - name: Build csdr
+        run: |
+          git clone https://github.com/luarvique/csdr.git "$RUNNER_TEMP/csdr"
+          cd "$RUNNER_TEMP/csdr"
+          git checkout "$CSDR_REF"
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j "$(nproc)"
+          sudo cmake --install build
+          sudo ldconfig
+
+      - name: Build pycsdr
+        run: |
+          git clone https://github.com/luarvique/pycsdr.git "$RUNNER_TEMP/pycsdr"
+          cd "$RUNNER_TEMP/pycsdr"
+          git checkout "$PYCSDR_REF"
+          python setup.py build_ext --inplace
+          echo "PYTHONPATH=$RUNNER_TEMP/pycsdr" >> "$GITHUB_ENV"
+
+      - name: Python unit tests
+        run: python -m unittest discover -s test -t . -v
+
+      - name: JavaScript unit tests
+        run: node --test "test/js/*.test.js"
+
+      - name: Install Playwright
+        working-directory: test/e2e
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: End-to-end tests (real server, fake SDR, headless Chromium)
+        run: test/e2e/run.sh
