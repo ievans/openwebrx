@@ -2404,6 +2404,12 @@ img.openwebrx-mirror-img
     white-space: nowrap;
 }
 
+/* Beside the playhead label rather than under it, so the two never overlap
+   when the lines meet (the right side is covered by the receiver panel) */
+#openwebrx-iq-buffer-marker span {
+    left: 120px;
+}
+
 .openwebrx-spike-log {
     max-height: 120px;
     overflow-y: auto;
