@@ -1,12 +1,19 @@
 // Pages must never run stale scripts or styles after an update
 const { test } = require('node:test');
 const assert = require('node:assert');
+const http = require('node:http');
 const h = require('./helpers');
 
-async function head(path, headers = {}) {
-    const r = await fetch(h.URL + path, { headers });
-    await r.arrayBuffer();
-    return r;
+// node:http rather than fetch: the undici in Node 22.23.3 asserts when a
+// server closes the connection after a large response, as this one does
+function head(path, headers = {}) {
+    return new Promise((resolve, reject) => {
+        http.get(h.URL + path, { headers }, r => {
+            r.resume();
+            r.on('end', () => resolve({ status: r.statusCode, headers: { get: k => r.headers[k.toLowerCase()] ?? null } }));
+            r.on('error', reject);
+        }).on('error', reject);
+    });
 }
 
 test('scripts and styles are revalidated on every load', async () => {
