@@ -54,7 +54,12 @@ WaterfallHistory.prototype.push = function(data) {
     this.bytes += d.byteLength;
     this.evict();
 
-    // Keep the playhead, buffer marker and labels current, but not too often
+    // The waterfall scrolls by one row on every line, so the markers must
+    // move in lockstep too, or they visibly lag and then jump to catch up
+    this.updateBufferMarker();
+    this.updatePlayheadMarker();
+
+    // The rest of the UI only needs to refresh occasionally
     if (Date.now() - this.lastUi > (this.live? 1000 : 250)) this.updateUi();
 };
 
@@ -306,19 +311,11 @@ WaterfallHistory.prototype.tick = function() {
         }
     }
 
+    // Move the playhead every tick, not just when the rest of the UI
+    // refreshes, or it visibly lags behind and then jumps to catch up
+    this.updatePlayheadMarker();
+
     if (now - this.lastUi > 250) this.updateUi();
-};
-
-WaterfallHistory.prototype.getDuration = function() {
-    if (this.frames.length < 2) return 0;
-    return (this.frames[this.frames.length - 1].t - this.frames[0].t) / 1000;
-};
-
-WaterfallHistory.prototype.formatDelta = function(sec) {
-    sec = Math.round(sec);
-    var m = Math.floor(sec / 60);
-    var s = sec % 60;
-    return '-' + m + ':' + ('' + s).padStart(2, '0');
 };
 
 // Mark on the (always live) waterfall how far back the server's IQ buffer
@@ -370,51 +367,18 @@ WaterfallHistory.prototype.updatePlayheadMarker = function() {
     }
 };
 
+// The playhead and IQ buffer markers already show the replay position and
+// how far back audio is available, so the banner is just a plain prompt
+// back to live, shown whenever not live.
 WaterfallHistory.prototype.updateUi = function() {
     this.lastUi = Date.now();
 
     this.updateBufferMarker();
     this.updatePlayheadMarker();
 
-    var $overlay = $('#openwebrx-history-overlay');
-    var $label   = $('#openwebrx-history-label');
-    var $button  = $('.openwebrx-history-button');
-    var n = this.frames.length;
-
-    // Play/pause shows what pressing it does, and is lit while paused.
-    // LIVE is lit while showing live data.
-    var moving = this.live || this.speed != 0;
-    $button.html(moving? '&#10074;&#10074;' : '&#9654;');
-    $button.attr('title', moving? 'Pause waterfall and audio' : 'Play at normal speed');
-    $button.toggleClass('highlighted', !moving);
-    $('.openwebrx-live-button').toggleClass('highlighted', this.live);
-    var speed = this.speed;
-    $('.openwebrx-history-speed').each(function() {
-        $(this).toggleClass('highlighted', !!speed && Number(this.dataset.speed) == speed);
-    });
-
-    if (this.live || !n) {
-        $overlay.hide();
-        $label.show().text('LIVE ' + this.formatDelta(this.getDuration()).substring(1));
-        return;
+    if (this.live) {
+        $('#openwebrx-history-overlay').hide();
+    } else {
+        $('#openwebrx-history-overlay').show();
     }
-
-    var f = this.frames[this.cursor];
-    var delta = (this.frames[n - 1].t - f.t) / 1000;
-    var text = this.formatDelta(delta);
-    if (this.speed != 0) text += ' ' + (this.speed > 0? '▶' : '◀') + Math.abs(this.speed) + 'x';
-
-    // The red banner and the playhead marker on the waterfall already show
-    // this, no need to repeat it here too
-    $label.hide();
-    // Explain why the server does not replay the whole spectrum
-    var reason = !this.canReplayOnServer()? 'IQ time-shift buffer is off on the server'
-        : this.replayError || '';
-    var audio = this.speed != 1? 'audio paused'
-        : this.serverReplay === 'active'? 'replaying audio, tune anywhere'
-        : this.serverReplay === 'pending'? 'loading audio'
-        : (this.localMismatch? 'no recorded audio at this frequency'
-            : 'replaying audio of tuned frequency only') + (reason? ' (' + reason + ')' : '');
-    $overlay.find('.openwebrx-history-overlay-text').text('REPLAY ' + text + ' · ' + audio);
-    $overlay.show();
 };

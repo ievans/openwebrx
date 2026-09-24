@@ -10,59 +10,53 @@ after(async () => { await browser.close(); });
 const silent = a => a.buffers === 0 || a.rms === 0;
 const audible = a => a.buffers > 0 && a.rms > 0.001;
 
-// The waterfall never freezes any more: it always shows live data, and a
-// moving "playhead" line marks the replay position on top of it instead.
-const playheadVisible = page => page.evaluate(() => $('#openwebrx-replay-position-marker').is(':visible'));
-
 test('play/pause, LIVE, keys and playback control waterfall and audio', async () => {
     const page = await h.openReceiver(browser);
     await page.waitForTimeout(4000);    // build up some history
 
     let s = await h.historyState(page);
-    assert.ok(s.live && s.liveLit && !s.pauseLit && !s.playIcon && !s.badge, 'starts live, showing pause: ' + JSON.stringify(s));
+    assert.ok(s.live && !s.badge && !s.playheadVisible, 'starts live, no badge or playhead: ' + JSON.stringify(s));
     assert.ok(audible(await h.audioOutput(page)), 'live audio plays');
     assert.ok(await h.waterfallMoving(page), 'live waterfall moves');
-    assert.ok(!(await playheadVisible(page)), 'no playhead while live');
 
-    // -10s/+10s must not get stuck paused if it was playing beforehand
-    await page.click('text=-10s');
+    // Q/E (-10s/+10s) must not get stuck paused if it was playing beforehand
+    await page.keyboard.press('q');
     s = await h.historyState(page);
     assert.ok(!s.live && s.speed === 1, '-10s while live keeps playing: ' + JSON.stringify(s));
     assert.ok(await h.waterfallMoving(page), 'waterfall keeps moving after -10s');
-    await page.click('.openwebrx-live-button');
+    await page.keyboard.press('End');
 
-    await page.click('.openwebrx-history-button');
+    await page.keyboard.press('w');   // W: play/pause
     s = await h.historyState(page);
-    assert.ok(!s.live && s.speed === 0 && s.pauseLit && s.playIcon && !s.liveLit, 'pauses, now showing play: ' + JSON.stringify(s));
-    assert.match(s.badge, /REPLAY .* audio paused/);
+    assert.ok(!s.live && s.speed === 0, 'W pauses: ' + JSON.stringify(s));
+    assert.ok(s.badge, 'banner prompts back to live');
     assert.ok(await h.waterfallMoving(page), 'the waterfall itself keeps moving, only audio pauses');
-    assert.ok(await playheadVisible(page), 'playhead marker appears once paused');
+    assert.ok(s.playheadVisible, 'playhead marker appears once paused');
     assert.ok(silent(await h.audioOutput(page)), 'no audio while paused');
 
-    await page.click('text=-10s');
+    await page.keyboard.press('q');
     assert.ok(!(await h.historyState(page)).live, '-10s stays in history');
-    await page.click('.openwebrx-history-button');
+    await page.keyboard.press('w');   // W again: play history at 1x
     // Audio source settles once the server answers the replay request
     await page.waitForFunction(() => ['active', 'failed'].includes(wfHistory.serverReplay), null, { timeout: 5000 });
     s = await h.historyState(page);
-    assert.ok(!s.live && s.speed === 1 && !s.playIcon, 'play/pause plays history at 1x, showing pause: ' + JSON.stringify(s));
-    assert.match(s.badge, /replaying audio/);
+    assert.ok(!s.live && s.speed === 1, 'W plays history at 1x: ' + JSON.stringify(s));
     assert.ok(await h.waterfallMoving(page), 'waterfall moves during playback');
     assert.ok(audible(await h.audioOutput(page)), 'recorded audio plays during playback');
 
-    await page.click('.openwebrx-history-button');
+    await page.keyboard.press('w');
     s = await h.historyState(page);
-    assert.ok(!s.live && s.speed === 0 && s.playIcon, 'pausing playback stays in history: ' + JSON.stringify(s));
+    assert.ok(!s.live && s.speed === 0, 'pausing playback stays in history: ' + JSON.stringify(s));
     assert.ok(await h.waterfallMoving(page), 'the waterfall keeps moving, only audio pauses');
-    assert.ok(await playheadVisible(page), 'playhead marker still shown while paused');
+    assert.ok(s.playheadVisible, 'playhead marker still shown while paused');
     assert.ok(silent(await h.audioOutput(page)), 'no audio after pausing playback');
 
-    await page.click('.openwebrx-live-button');
+    await page.keyboard.press('End');   // END: return to live
     s = await h.historyState(page);
-    assert.ok(s.live && s.liveLit && !s.badge, 'LIVE button returns to live: ' + JSON.stringify(s));
+    assert.ok(s.live && !s.badge, 'END returns to live: ' + JSON.stringify(s));
     assert.ok(audible(await h.audioOutput(page)), 'live audio after LIVE');
     assert.ok(await h.waterfallMoving(page), 'waterfall moves after LIVE');
-    assert.ok(!(await playheadVisible(page)), 'playhead hides once live');
+    assert.ok(!s.playheadVisible, 'playhead hides once live');
 
     await page.keyboard.press('w');
     s = await h.historyState(page);
@@ -73,15 +67,16 @@ test('play/pause, LIVE, keys and playback control waterfall and audio', async ()
     await page.keyboard.press('End');
     assert.ok((await h.historyState(page)).live, 'End returns to live');
 
-    await page.click('.openwebrx-history-speed[data-speed="-4"]');
+    // No dedicated UI for 4x rewind/fast-forward any more, drive it directly
+    await page.evaluate(() => wfHistory.setSpeed(-4));
     s = await h.historyState(page);
     assert.ok(!s.live && s.speed === -4, 'rewinding: ' + JSON.stringify(s));
     assert.ok(silent(await h.audioOutput(page, 600)), 'no audio while rewinding');
     await page.click('#openwebrx-history-overlay');
-    assert.ok((await h.historyState(page)).live, 'clicking the REPLAY badge returns to live');
+    assert.ok((await h.historyState(page)).live, 'clicking the banner returns to live');
 
-    await page.click('text=-10s');
-    await page.click('.openwebrx-history-speed[data-speed="4"]');
+    await page.keyboard.press('q');
+    await page.evaluate(() => wfHistory.setSpeed(4));
     await page.waitForFunction(() => wfHistory.isLive(), null, { timeout: 10000 });
     assert.ok(audible(await h.audioOutput(page)), 'fast-forward catches up to live audio');
 
@@ -129,11 +124,11 @@ test('clicking the live waterfall rewinds to that moment and plays it', async ()
     const s = await h.historyState(page);
     assert.ok(!s.live && s.speed === 1, 'click rewinds and plays: ' + JSON.stringify(s));
     assert.ok(await h.waterfallMoving(page), 'waterfall keeps moving after the click');
-    assert.ok(await playheadVisible(page), 'playhead marker appears after the click');
+    assert.ok(s.playheadVisible, 'playhead marker appears after the click');
     const tuned = await page.evaluate(() => UI.getFrequency());
     assert.ok(Math.abs(tuned - h.CARRIER) < 3000, 'also tunes to the clicked frequency: ' + tuned);
 
-    await page.click('.openwebrx-live-button');
+    await page.keyboard.press('End');
     assert.deepStrictEqual(page.errors, []);
     await page.close();
 });
@@ -157,7 +152,7 @@ test('clicking further down while already replaying also seeks, relative to now'
     await page.evaluate(f => { UI.setModulation('nfm'); UI.setFrequency(f, false); }, h.CARRIER);
     await page.waitForTimeout(15000);
     await page.evaluate(() => wfHistory.skip(-3));
-    await page.click('.openwebrx-history-button');   // paused after seeking: play
+    await page.keyboard.press('w');   // paused after seeking: play
     await page.waitForFunction(() => wfHistory.serverReplay === 'active', null, { timeout: 5000 });
     const before = await page.evaluate(() => wfHistory.playT);
 
@@ -176,7 +171,7 @@ test('clicking further down while already replaying also seeks, relative to now'
     }));
     assert.match(position.label, /playhead at \d+s/, 'position marker is labelled: ' + JSON.stringify(position));
 
-    await page.click('.openwebrx-live-button');
+    await page.keyboard.press('End');
     assert.deepStrictEqual(page.errors, []);
     await page.close();
 });
@@ -189,9 +184,8 @@ test('while replaying, tune anywhere and hear that frequency as it was then', as
     // About 9 seconds back (with latency): 1.5 periods of the burst, so
     // the past and live burst are in opposite states and easy to tell apart
     await page.evaluate(() => wfHistory.skip(-8.5));
-    await page.click('.openwebrx-history-button');   // paused after seeking: play
+    await page.keyboard.press('w');   // paused after seeking: play
     await page.waitForFunction(() => wfHistory.serverReplay === 'active', null, { timeout: 5000 });
-    assert.match((await h.historyState(page)).badge, /tune anywhere/);
     // Now tune to the burst by clicking it on the waterfall, right at the
     // top (dead zone) so this only retunes and does not also seek
     await clickWaterfall(page, h.BURST, 2);
@@ -208,7 +202,7 @@ test('while replaying, tune anywhere and hear that frequency as it was then', as
     assert.ok(r.live <= 60, 'follows the live burst ' + Math.round(r.live) + '%');
     assert.ok(!(await h.historyState(page)).live, 'still replaying');
     // Back to live: audio follows the live burst again
-    await page.click('.openwebrx-live-button');
+    await page.keyboard.press('End');
     const liveStart = await page.evaluate(() => Date.now());
     await page.waitForTimeout(6000);
     const liveOut = await page.evaluate(start => window.__audio.filter(x => x[0] > start + 1000), liveStart);
@@ -224,9 +218,9 @@ test('beyond the IQ buffer, playback falls back to the recorded audio of the tun
     await page.waitForTimeout(20000);
     // 15 seconds back is older than the server's 12 second IQ buffer
     await page.evaluate(() => wfHistory.skip(-15));
-    await page.click('.openwebrx-history-button');   // paused after seeking: play
+    await page.keyboard.press('w');   // paused after seeking: play
     await page.waitForFunction(() => wfHistory.serverReplay === 'failed', null, { timeout: 5000 });
-    assert.match((await h.historyState(page)).badge, /tuned frequency only \(No IQ data buffered from \d+ seconds ago\)/);
+    assert.match(await page.evaluate(() => wfHistory.replayError), /No IQ data buffered/);
     const age = await page.evaluate(() => Date.now() - wfHistory.playT);
     const start = await page.evaluate(() => Date.now());
     await page.waitForTimeout(8000);
@@ -244,7 +238,7 @@ test('beyond the IQ buffer, playback falls back to the recorded audio of the tun
     const other = await h.audioOutput(page, 2000);
     assert.ok(other.buffers === 0 || other.rms === 0, 'played audio from another frequency: ' + JSON.stringify(other));
     await page.waitForTimeout(300);
-    assert.match((await h.historyState(page)).badge, /no recorded audio at this frequency/);
+    assert.strictEqual(await page.evaluate(() => wfHistory.localMismatch), true, 'no recorded audio at this frequency');
     assert.deepStrictEqual(page.errors, []);
     await page.close();
 });

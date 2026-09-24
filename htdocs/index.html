@@ -76,8 +76,8 @@
             <div id="openwebrx-iq-buffer-marker" style="display:none;" title="Above this line, clicking the waterfall replays audio too. Below it, only the past spectrum is available.">
                 <span></span>
             </div>
-            <div id="openwebrx-history-overlay" style="display:none;" title="Click to return to live waterfall" onclick="wfHistory.goLive();">
-                <span class="openwebrx-history-overlay-text">REPLAY</span> &#8212; click for LIVE
+            <div id="openwebrx-history-overlay" style="display:none;" onclick="wfHistory.goLive();">
+                click to return to live playback
             </div>
         </div>
         <div id="openwebrx-panels-container">
@@ -333,22 +333,13 @@
                             <div id="openwebrx-spike-log" class="openwebrx-spike-log" title="Click frequency to tune, click time to show on waterfall" onclick="UI.clickSpikeLog(event);"></div>
                         </div>
                     </div>
-                    <div id="openwebrx-section-replay" class="openwebrx-section-divider" onclick="UI.toggleSection(this);">&blacktriangle;&nbsp;Replay</div>
+                    <div id="openwebrx-section-replay" class="openwebrx-section-divider" onclick="UI.toggleSection(this);">&blacktriangle;&nbsp;IQ Recording</div>
                     <div class="openwebrx-section">
-                        <div class="openwebrx-panel-line openwebrx-panel-flex-line">
-                            <div title="Play / pause waterfall and audio" class="openwebrx-button openwebrx-tool-button openwebrx-history-button" onclick="wfHistory.togglePlay();">&#10074;&#10074;</div>
-                            <div title="Back 10 seconds" class="openwebrx-button openwebrx-tool-button" onclick="wfHistory.skip(-10);">-10s</div>
-                            <div title="Rewind at 4x" class="openwebrx-button openwebrx-tool-button openwebrx-history-speed" data-speed="-4" onclick="wfHistory.setSpeed(-4);">&#9664;&#9664;</div>
-                            <div title="Fast forward at 4x" class="openwebrx-button openwebrx-tool-button openwebrx-history-speed" data-speed="4" onclick="wfHistory.setSpeed(4);">&#9654;&#9654;</div>
-                            <div title="Forward 10 seconds" class="openwebrx-button openwebrx-tool-button" onclick="wfHistory.skip(10);">+10s</div>
-                            <div title="Return to live waterfall and audio" class="openwebrx-button openwebrx-tool-button openwebrx-live-button" onclick="wfHistory.goLive();">LIVE</div>
-                        </div>
                         <div class="openwebrx-panel-line openwebrx-panel-flex-line">
                             <div title="Record raw IQ spectrum on the server" class="openwebrx-button openwebrx-tool-button openwebrx-iq-record-button" style="display:none;" onclick="UI.toggleIqRecording();">&#9679;&nbsp;IQ</div>
                             <div title="Save the last seconds of raw IQ buffered on the server" class="openwebrx-button openwebrx-tool-button openwebrx-iq-save-button" style="display:none;" onclick="UI.saveIqBuffer();">&#9194;&nbsp;SAVE</div>
                         </div>
                         <div class="openwebrx-panel-line openwebrx-tool-status">
-                            <span id="openwebrx-history-label">LIVE</span>
                             <span id="openwebrx-iq-record-label"></span>
                         </div>
                     </div>

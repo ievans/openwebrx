@@ -271,7 +271,7 @@ test('IQ buffer marker shows where server replay runs out, labelled in plain sec
 test('IQ buffer marker stays hidden without a configured buffer, or once it exceeds the history', () => {
     const s = setup();
     s.run(10);               // 1 second of history, no iq_buffer_seconds configured
-    assert.strictEqual(s.marks['#openwebrx-iq-buffer-marker'], undefined, 'never shown without a buffer configured');
+    assert.strictEqual(s.marks['#openwebrx-iq-buffer-marker'].visible, false, 'never shown without a buffer configured');
     s.ctx.iq_buffer_seconds = 30;   // longer than the recorded history
     s.h.updateBufferMarker();
     assert.strictEqual(s.marks['#openwebrx-iq-buffer-marker'].visible, false, 'hidden once the buffer exceeds recorded history');
