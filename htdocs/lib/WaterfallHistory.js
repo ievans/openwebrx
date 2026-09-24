@@ -25,10 +25,7 @@ function WaterfallHistory() {
     // server can not replay, only locally remembered audio is played)
     this.serverReplay = 'off';
     this.replayId     = 0;
-    this.replayError  = null;
     this.replayTimer  = 0;
-    // TRUE when locally remembered audio exists, but for another frequency
-    this.localMismatch = false;
     this.lastUi   = 0;
     // Rows down from the top of the waterfall where the IQ buffer line is
     // drawn, or -1 when not shown
@@ -93,27 +90,6 @@ WaterfallHistory.prototype.evict = function() {
         this.frames.splice(0, n);
         if (this.cursor >= 0) this.cursor = Math.max(0, this.cursor - n);
     }
-};
-
-// Decode a stored frame into dB values matching the CURRENT display,
-// remapping it if it was captured at a different center frequency.
-WaterfallHistory.prototype.frameData = function(i) {
-    var f = this.frames[i];
-    var len = f.d.length;
-    var out = new Float32Array(fft_size);
-    var j;
-
-    if (f.cf == center_freq && f.bw == bandwidth && len == fft_size) {
-        for (j = 0; j < len; ++j) out[j] = f.d[j] / 100;
-    } else {
-        for (j = 0; j < fft_size; ++j) {
-            var freq = center_freq + (j / fft_size - 0.5) * bandwidth;
-            var k = Math.round(((freq - f.cf) / f.bw + 0.5) * len);
-            out[j] = k >= 0 && k < len? f.d[k] / 100 : -200;
-        }
-    }
-
-    return out;
 };
 
 // Stop tracking live audio; the playhead starts out at the newest frame.
@@ -273,7 +249,6 @@ WaterfallHistory.prototype.requestServerReplay = function() {
     var me = this;
     var id = ++this.replayId;
     this.serverReplay = 'pending';
-    this.replayError = null;
     // Seeking repeatedly (e.g. clicking -10s a few times) moves a lot,
     // only ask once it settles
     clearTimeout(this.replayTimer);
@@ -301,7 +276,6 @@ WaterfallHistory.prototype.onReplayStatus = function(status) {
     } else {
         // Continue with locally remembered audio of the tuned frequency
         this.serverReplay = 'failed';
-        this.replayError = status.error;
     }
     this.updateAudio();
     this.updateUi();
@@ -333,8 +307,7 @@ WaterfallHistory.prototype.tick = function() {
         if (this.speed == 1) {
             var local = this.serverReplay === 'off' || this.serverReplay === 'failed';
             if (local && this.audioT !== null) {
-                var r = audioEngine.replay(this.audioT, t);
-                if (r.played || r.skipped) this.localMismatch = !r.played;
+                audioEngine.replay(this.audioT, t);
             }
             this.audioT = t;
             // push() keeps the playhead on its row; only re-place it if

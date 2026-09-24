@@ -32,6 +32,7 @@ class IqReplay(object):
         self.sdrSource = sdrSource
         self.onStop = onStop
         self.buffer = None
+        self.reader = None
         self.thread = None
         self.running = False
         self.error = None
@@ -52,8 +53,9 @@ class IqReplay(object):
         # Chunk N gets written at its original arrival time plus this delay
         delay = time.monotonic() - chunk[3]
         self.buffer = Buffer(Format.COMPLEX_FLOAT)
+        self.reader = self.buffer.getReader()
         self.running = True
-        self.dsp.setInputReader(self.buffer.getReader())
+        self.dsp.setInputReader(self.reader)
         self.thread = threading.Thread(target=self._run, args=(seq, delay), name="iq-replay")
         self.thread.start()
         logger.debug("Started IQ replay from %.1f seconds ago", age)
@@ -66,6 +68,13 @@ class IqReplay(object):
             self.error = error
         if self.thread is not None and self.thread is not threading.current_thread():
             self.thread.join(2)
+            if self.thread.is_alive():
+                # The writer thread is likely blocked inside buffer.write()
+                # because the demodulator has not been draining it; stopping
+                # the reader unblocks it so the thread can exit instead of
+                # leaking a blocked thread and its buffer forever.
+                self.reader.stop()
+                self.thread.join()
         self.dsp.setInputReader(None)
 
     def _run(self, seq: int, delay: float):

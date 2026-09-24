@@ -190,8 +190,8 @@ test('clicking below the IQ buffer line snaps playback to it, and audio replays'
 
     assert.strictEqual(await page.evaluate(() => $('#openwebrx-replay-position-marker').css('top')), line, 'playhead snapped to the buffer line');
     await page.waitForFunction(() => wfHistory.serverReplay !== 'pending', null, { timeout: 5000 });
-    const replay = await page.evaluate(() => ({ state: wfHistory.serverReplay, error: wfHistory.replayError }));
-    assert.strictEqual(replay.state, 'active', 'server replays from the snapped position: ' + JSON.stringify(replay));
+    const state = await page.evaluate(() => wfHistory.serverReplay);
+    assert.strictEqual(state, 'active', 'server replays from the snapped position: ' + state);
     assert.ok(audible(await h.audioOutput(page)), 'replayed audio plays');
 
     await page.keyboard.press('End');
@@ -276,8 +276,7 @@ test('skipping back past the IQ buffer stops at its line, where the server still
     assert.strictEqual(pos.playhead, pos.line, 'stopped at the buffer line: ' + JSON.stringify(pos));
     assert.strictEqual(pos.speed, 1);
     await page.waitForFunction(() => wfHistory.serverReplay !== 'pending', null, { timeout: 5000 });
-    assert.strictEqual(await page.evaluate(() => wfHistory.serverReplay), 'active',
-        'server replays: ' + await page.evaluate(() => wfHistory.replayError));
+    assert.strictEqual(await page.evaluate(() => wfHistory.serverReplay), 'active');
     const age = await page.evaluate(() => Date.now() - wfHistory.playT);
     const start = await page.evaluate(() => Date.now());
     await page.waitForTimeout(8000);

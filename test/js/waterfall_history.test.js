@@ -381,16 +381,6 @@ test('fast-forward catches up and returns to live audio', () => {
     assert.strictEqual(s.played.length, 2, 'live audio plays again');
 });
 
-test('frames recorded at another center frequency are remapped', () => {
-    const s = setup();
-    s.run(1);
-    s.ctx.center_freq += 400;      // half the bandwidth up
-    const d = s.h.frameData(0);
-    // old spectrum's upper half now shows in the lower half, the rest is empty
-    assert.deepStrictEqual(Array.from(d.slice(0, 4)), [-1, -1, -1, -1]);
-    assert.deepStrictEqual(Array.from(d.slice(4)), [-200, -200, -200, -200]);
-});
-
 // Server side IQ replay (tune anywhere while listening to the past)
 
 function serverSetup() {
@@ -487,18 +477,15 @@ test('local replay never plays audio recorded at another frequency', () => {
     s.played.length = 0;
     s.play(1000);
     assert.ok(s.played.length >= 9, 'recorded frequency plays: ' + s.played.length);
-    assert.strictEqual(s.h.localMismatch, false);
     // user tunes elsewhere: no audio from the old frequency
     tuning = '145500000 nfm';
     s.played.length = 0;
     s.play(1000);
     assert.deepStrictEqual(s.played, [], 'played audio recorded at another frequency');
-    assert.strictEqual(s.h.localMismatch, true);
     // tuning back plays again
     tuning = '145000000 nfm';
     s.play(1000);
     assert.ok(s.played.length >= 9);
-    assert.strictEqual(s.h.localMismatch, false);
 });
 
 test('play/pause button pauses, plays at 1x, and never returns to live', () => {
