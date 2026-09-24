@@ -51,9 +51,18 @@ class ConnectorSource(SdrSource):
             and "lfo_offset" in self.sdrProps
             and self.sdrProps["lfo_offset"] is not None
         ):
-            changes["center_freq"] = self.sdrProps["center_freq"] + self.sdrProps["lfo_offset"]
+            changes["center_freq"] = self.getTunerFrequency()
             changes.pop("lfo_offset", None)
         self.sendControlMessage(changes)
+
+    def getTunerFrequency(self):
+        """
+        the frequency the hardware should actually be tuned to. can be overridden to apply device-specific corrections.
+        """
+        freq = self.sdrProps["center_freq"]
+        if "lfo_offset" in self.sdrProps and self.sdrProps["lfo_offset"] is not None:
+            freq += self.sdrProps["lfo_offset"]
+        return freq
 
     def postStart(self):
         self.logger.debug("opening control socket...")
