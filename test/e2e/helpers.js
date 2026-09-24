@@ -2,7 +2,6 @@
 const { chromium } = require('playwright');
 
 const URL = process.env.OWRX_URL || 'http://127.0.0.1:18073';
-const FILES = process.env.OWRX_FILES;
 
 // The fake SDR (bin/perseustest) puts signals at these frequencies
 const CENTER = 145000000;
@@ -16,8 +15,8 @@ async function launch() {
     });
 }
 
-// Open the receiver page with audio running and the Scan & IQ Recording
-// sections visible, and tap the audio output to measure what would be heard.
+// Open the receiver page with audio running and the Scan section visible,
+// and tap the audio output to measure what would be heard.
 async function openReceiver(browser) {
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
     page.errors = [];
@@ -42,7 +41,6 @@ async function openReceiver(browser) {
             audioEngine.audioBuffers.push = b => { tap(b); return push(b); };
         }
         UI.toggleSection(document.getElementById('openwebrx-section-scan'), true);
-        UI.toggleSection(document.getElementById('openwebrx-section-replay'), true);
     });
     return page;
 }
@@ -83,16 +81,4 @@ function historyState(page) {
     }));
 }
 
-// Level in dBFS of a tone at OFFSET Hz in complex float32 IQ data
-function toneLevel(iq, rate, offset, start, n = 5000) {
-    let re = 0, im = 0;
-    for (let i = 0; i < n; i++) {
-        const p = -2 * Math.PI * offset * i / rate;
-        const x = iq[2 * (start + i)], y = iq[2 * (start + i) + 1];
-        re += x * Math.cos(p) - y * Math.sin(p);
-        im += x * Math.sin(p) + y * Math.cos(p);
-    }
-    return 20 * Math.log10(Math.hypot(re, im) / n + 1e-12);
-}
-
-module.exports = { URL, FILES, CENTER, CARRIER, BURST, launch, openReceiver, audioOutput, waterfall, waterfallMoving, historyState, toneLevel };
+module.exports = { URL, CENTER, CARRIER, BURST, launch, openReceiver, audioOutput, waterfall, waterfallMoving, historyState };

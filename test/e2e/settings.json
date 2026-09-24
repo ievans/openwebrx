@@ -16,7 +16,6 @@
             }
         }
     },
-    "allow_iq_recording": true,
     "iq_buffer_seconds": 12,
     "magic_key": ""
 }

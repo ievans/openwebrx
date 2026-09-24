@@ -231,7 +231,7 @@
                     <div class="openwebrx-progressbar" id="openwebrx-bar-server-cpu" data-type="cpu"></div>
                     <div class="openwebrx-progressbar" id="openwebrx-bar-server-memory" data-type="memory"></div>
                     <div class="openwebrx-progressbar" id="openwebrx-bar-clients" data-type="clients"></div>
-                    <div class="openwebrx-progressbar" id="openwebrx-bar-iq-buffer" data-type="iqbuffer"></div>
+                    <div class="openwebrx-progressbar" id="openwebrx-bar-iq-buffer" data-type="iqbuffer" style="display:none;"></div>
                 </div>
             </div>
             <div id="openwebrx-panels-container-right">
@@ -331,16 +331,6 @@
                         </div>
                         <div class="openwebrx-panel-line">
                             <div id="openwebrx-spike-log" class="openwebrx-spike-log" title="Click frequency to tune, click time to show on waterfall" onclick="UI.clickSpikeLog(event);"></div>
-                        </div>
-                    </div>
-                    <div id="openwebrx-section-replay" class="openwebrx-section-divider" onclick="UI.toggleSection(this);">&blacktriangle;&nbsp;IQ Recording</div>
-                    <div class="openwebrx-section">
-                        <div class="openwebrx-panel-line openwebrx-panel-flex-line">
-                            <div title="Record raw IQ spectrum on the server" class="openwebrx-button openwebrx-tool-button openwebrx-iq-record-button" style="display:none;" onclick="UI.toggleIqRecording();">&#9679;&nbsp;IQ</div>
-                            <div title="Save the last seconds of raw IQ buffered on the server" class="openwebrx-button openwebrx-tool-button openwebrx-iq-save-button" style="display:none;" onclick="UI.saveIqBuffer();">&#9194;&nbsp;SAVE</div>
-                        </div>
-                        <div class="openwebrx-panel-line openwebrx-tool-status">
-                            <span id="openwebrx-iq-record-label"></span>
                         </div>
                     </div>
                     <div id="openwebrx-section-settings" class="openwebrx-section-divider" onclick="UI.toggleSection(this);">&blacktriangle;&nbsp;Settings</div>

@@ -3,8 +3,7 @@ from unittest.mock import patch
 from owrx.iqbuffer import IqTimeShiftBuffer
 from owrx.iqreplay import IqReplay, ReplayUnavailable
 from owrx.source import SdrSourceState
-from test.iq.fakes import FakeSource
-from test.iq.test_iqrecorder import samples
+from test.iq.fakes import FakeSource, samples
 import struct
 import threading
 import time

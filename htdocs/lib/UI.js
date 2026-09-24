@@ -26,7 +26,6 @@ UI.sections = {
     'modes'   : true,
     'controls': true,
     'scan'    : false,
-    'replay'  : false,
     'settings': false,
     'display' : true
 };
@@ -513,85 +512,6 @@ UI.clickSpikeLog = function(evt) {
         // Stay on the chosen signal, keep logging activity
         this.setSpikeAutoTune(false);
         this.setFrequency(e.freq);
-    }
-};
-
-//
-// Server-side IQ Recording Controls
-//
-
-UI.iqRecording = { recording: false, started: 0, timer: 0 };
-
-UI.toggleIqRecording = function(on) {
-    // If no argument given, toggle IQ recording
-    if (typeof(on) === 'undefined') on = !this.iqRecording.recording;
-
-    ws.send(JSON.stringify({
-        "type": "iqrecord",
-        "params": {
-            "action": on? "start" : "stop",
-            "key": this.getDemodulatorPanel().getMagicKey()
-        }
-    }));
-};
-
-// Ask server to save the last few seconds of buffered IQ data.
-UI.saveIqBuffer = function() {
-    ws.send(JSON.stringify({
-        "type": "iqrecord",
-        "params": {
-            "action": "save",
-            "key": this.getDemodulatorPanel().getMagicKey()
-        }
-    }));
-    this.showBubble('Saving buffered IQ...');
-};
-
-// Handle result of saving buffered IQ data.
-UI.setIqSavedStatus = function(status) {
-    if (status.error) {
-        divlog('IQ save: ' + status.error, true);
-        this.showBubble('IQ save: ' + Utils.htmlEscape(status.error));
-    } else {
-        var mb = Math.round((status.size || 0) / 1024 / 1024);
-        var sec = Math.round(status.seconds || 0);
-        divlog('Saved last ' + sec + 's of IQ to ' + status.file + ' (' + mb + 'MB).');
-        this.showBubble('Saved last ' + sec + 's to ' + Utils.htmlEscape(status.file) + ' (' + mb + 'MB)');
-    }
-};
-
-// Handle IQ recording status reported by the server.
-UI.setIqRecordingStatus = function(status) {
-    var rec = this.iqRecording;
-    var $button = $('.openwebrx-iq-record-button');
-    var $label = $('#openwebrx-iq-record-label');
-
-    rec.recording = !!status.recording;
-    $button.css('animation-name', rec.recording? 'openwebrx-record-animation' : '');
-
-    if (rec.timer) {
-        clearInterval(rec.timer);
-        rec.timer = 0;
-    }
-
-    if (rec.recording) {
-        rec.started = Date.now();
-        rec.timer = setInterval(function() {
-            var sec = Math.round((Date.now() - rec.started) / 1000);
-            $label.text('IQ ' + Math.floor(sec / 60) + ':' + ('' + (sec % 60)).padStart(2, '0'));
-        }, 1000);
-        $label.text('IQ 0:00');
-    } else {
-        $label.text('');
-    }
-
-    if (status.error) {
-        divlog('IQ recording: ' + status.error, true);
-        this.showBubble('IQ recording: ' + Utils.htmlEscape(status.error));
-    } else if (!rec.recording && status.file) {
-        var mb = Math.round((status.size || 0) / 1024 / 1024);
-        divlog('IQ recording saved to ' + status.file + ' (' + mb + 'MB).');
-        this.showBubble('Saved ' + Utils.htmlEscape(status.file) + ' (' + mb + 'MB)');
     }
 };
 

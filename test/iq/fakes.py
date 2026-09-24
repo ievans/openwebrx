@@ -1,6 +1,13 @@
 from owrx.property import PropertyLayer
 import queue
+import struct
 import threading
+
+
+def samples(*values):
+    """Complex float32 samples with I = Q = value, as a typed memoryview."""
+    data = struct.pack("<%df" % (2 * len(values)), *[v for v in values for _ in (0, 1)])
+    return memoryview(data).cast("f")
 
 
 class FakeReader(object):

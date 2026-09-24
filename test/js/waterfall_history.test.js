@@ -73,7 +73,7 @@ function setup() {
         }
     };
     const runTimeouts = () => { while (timeouts.length) timeouts.shift()(); };
-    return { h, audio, drawn, played, marks, run, step, play, ctx, sent, runTimeouts, receive };
+    return { h, audio, drawn, played, marks, run, step, play, ctx, sent, runTimeouts, receive, clock };
 }
 
 test('live: lines are drawn and audio is played', () => {
@@ -218,11 +218,13 @@ test('clicking right at the top of the live waterfall is just tuning', () => {
     assert.ok(s.h.isLive(), 'stays live for a click at the very top');
 });
 
-test('clicking below the buffered history is reported as out of range', () => {
+test('clicking below the recorded history snaps playback to the oldest line', () => {
     const s = setup();
     s.run(10);
-    assert.ok(!s.h.clickSeek(500));
-    assert.ok(s.h.isLive(), 'nothing changes when out of range');
+    assert.ok(s.h.clickSeek(500));
+    assert.ok(!s.h.isLive());
+    assert.strictEqual(s.h.cursor, 0);
+    assert.strictEqual(s.h.speed, 1);
 });
 
 test('clicking while already replaying seeks relative to now, since the waterfall stays live', () => {
@@ -265,7 +267,8 @@ test('IQ buffer marker shows where server replay runs out, labelled in plain sec
     s.run(100);              // 10 seconds of history
     const m = s.marks['#openwebrx-iq-buffer-marker'];
     assert.ok(m.visible, 'buffer marker shown once there is more history than the buffer');
-    assert.strictEqual(m.text, 'buffer at 6s');
+    // a little inside the buffer, since the server keeps dropping its oldest data
+    assert.strictEqual(m.text, 'buffer at 4s');
 });
 
 test('IQ buffer marker stays hidden without a configured buffer, or once it exceeds the history', () => {
@@ -275,6 +278,95 @@ test('IQ buffer marker stays hidden without a configured buffer, or once it exce
     s.ctx.iq_buffer_seconds = 30;   // longer than the recorded history
     s.h.updateBufferMarker();
     assert.strictEqual(s.marks['#openwebrx-iq-buffer-marker'].visible, false, 'hidden once the buffer exceeds recorded history');
+});
+
+// Lines arrive like they do over a real network: nominally every 100ms, but
+// each up to 90ms late, often bunching up. Playback ticks every 40ms.
+// Returns every distinct `top` the marker SELECTOR took while playing.
+function playJittery(s, ms, selector) {
+    let seed = 12345;
+    const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const due = [];
+    for (let t = 100; t <= ms; t += 100) due.push(s.ctx.Date.now() + t + Math.floor(rand() * 90));
+    const tops = new Set();
+    for (let t = 0; t < ms + 100; t += 10) {
+        s.ctx.Date.now() % 40 == 0 && s.h.tick();
+        while (due.length && due[0] <= s.ctx.Date.now()) { due.shift(); s.receive(); }
+        tops.add(s.marks[selector].top);
+        clockAdd(s, 10);
+    }
+    return [...tops];
+}
+const clockAdd = (s, ms) => { s.clock.now += ms; };
+
+test('playhead line holds still while playing at 1x, even with network jitter', () => {
+    const s = setup();
+    s.run(200);
+    assert.ok(s.h.clickSeek(80));
+    const tops = playJittery(s, 5000, '#openwebrx-replay-position-marker');
+    assert.deepStrictEqual(tops, ['80px'], 'the playhead bounced');
+    assert.ok(!s.h.isLive());
+});
+
+test('playhead audio stays in step with the line despite jitter', () => {
+    const s = setup();
+    s.run(200);
+    s.h.clickSeek(80);
+    playJittery(s, 5000, '#openwebrx-replay-position-marker');
+    const lagMs = s.ctx.Date.now() - s.h.playT;
+    const lineMs = s.h.frames[s.h.frames.length - 1].t - s.h.frames[s.h.cursor].t;
+    assert.ok(Math.abs(lagMs - lineMs) <= 1000, 'audio ' + lagMs + 'ms back, line ' + lineMs + 'ms back');
+});
+
+test('IQ buffer line holds still with network jitter', () => {
+    const s = setup();
+    s.ctx.iq_buffer_seconds = 6;
+    s.run(200);
+    s.h.clickSeek(20);
+    // long enough for jittery lines to reach the 6 second line
+    const tops = playJittery(s, 15000, '#openwebrx-iq-buffer-marker');
+    assert.strictEqual(tops.length, 1, 'the buffer line bounced: ' + tops.join(','));
+});
+
+test('clicking below the IQ buffer line snaps playback to the line', () => {
+    const s = setup();
+    s.ctx.iq_buffer_seconds = 6;
+    s.run(200);                      // 20 seconds of history, 6 seconds buffered
+    const line = s.marks['#openwebrx-iq-buffer-marker'].top;
+    assert.ok(s.h.clickSeek(150));   // 15 seconds back
+    assert.strictEqual(s.marks['#openwebrx-replay-position-marker'].top, line, 'playhead lands on the buffer line');
+    assert.strictEqual(s.h.speed, 1);
+    s.runTimeouts();
+    const req = starts(s);
+    assert.ok(req[req.length - 1].params.age_ms < 6000, 'asks for audio still in the buffer: ' + req[req.length - 1].params.age_ms);
+});
+
+test('skipping back past the IQ buffer line stops at the line', () => {
+    const s = setup();
+    s.ctx.iq_buffer_seconds = 6;
+    s.run(200);
+    s.h.skip(-15);
+    assert.strictEqual(s.marks['#openwebrx-replay-position-marker'].top, s.marks['#openwebrx-iq-buffer-marker'].top);
+    assert.strictEqual(s.h.speed, 1);
+});
+
+test('playing after a long pause starts at the IQ buffer line, not beyond it', () => {
+    const s = setup();
+    s.ctx.iq_buffer_seconds = 6;
+    s.run(100);
+    s.h.pause();
+    s.run(100);                      // paused for 10 seconds: now 10s back
+    s.h.togglePlay();
+    assert.strictEqual(s.h.speed, 1);
+    assert.strictEqual(s.marks['#openwebrx-replay-position-marker'].top, s.marks['#openwebrx-iq-buffer-marker'].top);
+});
+
+test('clicking above the IQ buffer line is not moved', () => {
+    const s = setup();
+    s.ctx.iq_buffer_seconds = 6;
+    s.run(200);
+    assert.ok(s.h.clickSeek(30));
+    assert.strictEqual(s.marks['#openwebrx-replay-position-marker'].top, '30px');
 });
 
 test('fast-forward catches up and returns to live audio', () => {
