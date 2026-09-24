@@ -66,7 +66,10 @@ class WebSocketConnection(object):
         (self.interruptPipeRecv, self.interruptPipeSend) = Pipe(duplex=False)
         self.open = True
         self.socketError = False
+        self.socketErrorLogged = False
         self.sendLock = threading.Lock()
+        self.closeHandledLock = threading.Lock()
+        self.closeHandled = False
 
         headers = {key.lower(): value for key, value in self.handler.headers.items()}
         if "upgrade" not in headers:
@@ -140,9 +143,12 @@ class WebSocketConnection(object):
             for i in range(0, len(input), n):
                 yield input[i: i + n]
 
+        justClosed = False
         with self.sendLock:
             if self.socketError:
-                logger.warning("_sendBytes() after socket error, ignoring")
+                if not self.socketErrorLogged:
+                    self.socketErrorLogged = True
+                    logger.warning("_sendBytes() after socket error, ignoring further data")
             else:
                 try:
                     for chunk in chunks(data_to_send, 1024):
@@ -151,19 +157,27 @@ class WebSocketConnection(object):
                             written = self.handler.wfile.write(chunk)
                             if written != len(chunk):
                                 logger.error("incomplete write! closing socket!")
-                                self.close(socketError=True)
+                                justClosed = self.close(socketError=True)
                                 break
                         else:
                             logger.debug("socket not returned from select; closing")
-                            self.close(socketError=True)
+                            justClosed = self.close(socketError=True)
                             break
                 # these exception happen when the socket is closed
                 except OSError:
                     logger.exception("OSError while writing data")
-                    self.close(socketError=True)
+                    justClosed = self.close(socketError=True)
                 except ValueError:
                     logger.exception("ValueError while writing data")
-                    self.close(socketError=True)
+                    justClosed = self.close(socketError=True)
+
+        if justClosed:
+            # don't wait for the read loop to notice the closed socket; stop
+            # the handler (and whatever it keeps producing, e.g. a DSP chain
+            # or the spectrum/waterfall feed) right away, instead of letting
+            # it keep generating data for a dead socket until the read loop
+            # wakes up from its select() and unwinds
+            self._notifyHandlerClosed()
 
     def interrupt(self):
         if self.interruptPipeSend is None:
@@ -178,7 +192,7 @@ class WebSocketConnection(object):
         finally:
             logger.debug("websocket loop ended; shutting down")
 
-            self.messageHandler.handleClose()
+            self._notifyHandlerClosed()
             self.cancelPing()
 
             if self.socketError:
@@ -193,6 +207,16 @@ class WebSocketConnection(object):
                 WebSocketConnection.connections.remove(self)
             except ValueError:
                 pass
+
+    def _notifyHandlerClosed(self):
+        with self.closeHandledLock:
+            if self.closeHandled:
+                return
+            self.closeHandled = True
+        try:
+            self.messageHandler.handleClose()
+        except Exception:
+            logger.exception("Exception in websocket handleClose()")
 
     def read_loop(self):
         def protected_read(num):
@@ -275,9 +299,10 @@ class WebSocketConnection(object):
         if socketError:
             self.socketError = True
         if not self.open:
-            return
+            return False
         self.open = False
         self.interrupt()
+        return True
 
     def cancelPing(self):
         if self.pingTimer:
