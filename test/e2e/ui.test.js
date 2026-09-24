@@ -44,12 +44,12 @@ test('spike scanner Tune is on by default, even after turning it off', async () 
     await page.close();
 });
 
-test('status shows IQ buffer fill and server memory', async () => {
+test('status shows IQ buffer fill and system memory', async () => {
     const page = await h.openReceiver(browser);
     await page.waitForFunction(() => /IQ buffer \[\d+% \d+\/12s\]/.test($('#openwebrx-bar-iq-buffer').text()), null, { timeout: 10000 });
     const title = await page.getAttribute('#openwebrx-bar-iq-buffer', 'title');
-    assert.match(title, /of 12 seconds at 2\.4MS\/s, \d+MB of 220MB server memory/);
-    await page.waitForFunction(() => /Server memory \[\d+% [\d.]+\/[\d.]+GB\]/.test($('#openwebrx-bar-server-memory').text()), null, { timeout: 10000 });
+    assert.match(title, /of 12 seconds at 2\.4MS\/s, \d+MB of 220MB system memory/);
+    await page.waitForFunction(() => /System memory \[\d+% [\d.]+\/[\d.]+GB\]/.test($('#openwebrx-bar-server-memory').text()), null, { timeout: 10000 });
     assert.deepStrictEqual(page.errors, []);
     await page.close();
 });
