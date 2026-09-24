@@ -208,7 +208,7 @@ IqBufferProgressBar = function(el) {
 IqBufferProgressBar.prototype = new ProgressBar();
 
 IqBufferProgressBar.prototype.getDefaultText = function() {
-    return 'IQ buffer';
+    return 'Playback Buffer';
 };
 
 IqBufferProgressBar.prototype.setStatus = function(status) {
@@ -216,10 +216,10 @@ IqBufferProgressBar.prototype.setStatus = function(status) {
     var fill = max? status.seconds / max : 0;
     var mb = function(b) { return Math.round(b / 1048576) + 'MB'; };
     this.set(fill,
-        'IQ buffer [' + Math.round(100 * fill) + '% ' + Math.round(status.seconds) + '/' + Math.round(max) + 's]',
+        'Playback Buffer [' + Math.round(100 * fill) + '% ' + Math.round(status.seconds) + '/' + Math.round(max) + 's]',
         false
     );
-    this.$el.attr('title', 'IQ time-shift buffer: ' + Math.round(status.seconds) + ' of ' + Math.round(max) +
+    this.$el.attr('title', 'Playback buffer: ' + Math.round(status.seconds) + ' of ' + Math.round(max) +
         ' seconds at ' + (status.samp_rate / 1e6) + 'MS/s, ' + mb(status.bytes) + ' of ' + mb(status.max_bytes) +
         ' system memory. Within this time you can tune anywhere while replaying.');
 };

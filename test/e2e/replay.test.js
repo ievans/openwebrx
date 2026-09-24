@@ -189,6 +189,12 @@ test('clicking below the IQ buffer line snaps playback to it, and audio replays'
     await clickWaterfall(page, h.CARRIER, 130);   // well below the line
 
     assert.strictEqual(await page.evaluate(() => $('#openwebrx-replay-position-marker').css('top')), line, 'playhead snapped to the buffer line');
+    const labelsOverlap = await page.evaluate(() => {
+        const p = $('#openwebrx-replay-position-marker span')[0].getBoundingClientRect();
+        const b = $('#openwebrx-iq-buffer-marker span')[0].getBoundingClientRect();
+        return !(p.right <= b.left || b.right <= p.left || p.bottom <= b.top || b.bottom <= p.top);
+    });
+    assert.ok(!labelsOverlap, 'playhead and buffer labels overlap');
     await page.waitForFunction(() => wfHistory.serverReplay !== 'pending', null, { timeout: 5000 });
     const replay = await page.evaluate(() => ({ state: wfHistory.serverReplay, error: wfHistory.replayError }));
     assert.strictEqual(replay.state, 'active', 'server replays from the snapped position: ' + JSON.stringify(replay));
