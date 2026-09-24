@@ -108,6 +108,17 @@ class IqRecorderTest(TestCase):
         self.assertNotIn(recorder, source.clients)
         self.assertIsNone(IqRecorder.getRecorder(source))
 
+    def testDoesNotLeakPropertySubscriptions(self):
+        source = FakeSource()
+        before = len(source.props.subscribers)
+        for _ in range(3):
+            recorder = IqRecorder(source, 10 ** 9, self.statuses.append)
+            recorder.start()
+            source.props["center_freq"] = 146000000
+            recorder.stop()
+            recorder.thread.join(5)
+        self.assertEqual(len(source.props.subscribers), before)
+
     def testStopsOnSampleRateChange(self):
         source = FakeSource()
         recorder = self.record(source)
