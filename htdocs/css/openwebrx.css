@@ -687,12 +687,16 @@ img.openwebrx-mirror-img
 	margin: 0 0 0 5.9px;
 	padding: 0px;
 	background-color:rgba(0, 0, 0, 0);
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
 }
 
 #openwebrx-panel-status div.openwebrx-progressbar
 {
 	width: 200px;
 	height: 20px;
+	margin: 0;
 }
 
 /* memory readout ("System memory [100% 999/999GB]") is the longest label of the
@@ -2373,15 +2377,20 @@ img.openwebrx-mirror-img
     white-space: nowrap;
 }
 
-/* Marks how far back the server's IQ buffer reaches, on the live waterfall */
-#openwebrx-iq-buffer-marker {
+/* Lines overlaid on the waterfall to mark replay-related positions */
+#openwebrx-iq-buffer-marker,
+#openwebrx-replay-position-marker {
     position: absolute;
     left: 0;
     right: 0;
     height: 0;
-    border-top: 1px dashed rgba(255, 255, 0, 0.7);
     z-index: 3;
     pointer-events: none;
+}
+
+/* Marks how far back the server's IQ buffer reaches */
+#openwebrx-iq-buffer-marker {
+    border-top: 1px dashed rgba(255, 255, 0, 0.7);
 }
 
 #openwebrx-iq-buffer-marker span {
@@ -2392,6 +2401,24 @@ img.openwebrx-mirror-img
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.6);
     color: #ffff80;
+    font-size: 8pt;
+    white-space: nowrap;
+}
+
+/* Marks the currently displayed (topmost) replay position */
+#openwebrx-replay-position-marker {
+    top: 0;
+    border-top: 2px solid rgba(0, 224, 192, 0.9);
+}
+
+#openwebrx-replay-position-marker span {
+    position: absolute;
+    left: 4px;
+    top: 2px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #80ffe0;
     font-size: 8pt;
     white-space: nowrap;
 }

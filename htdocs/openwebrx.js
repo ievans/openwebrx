@@ -747,9 +747,10 @@ function canvas_mouseup(evt) {
             UI.setFrequency(UI.getFrequency(get_relative_x(evt)));
             UI.toggleScanner(false);
             UI.toggleSpikeScanner(false);
-            // Clicking further down the live waterfall also jumps back to
-            // that moment and starts playing it, instead of only tuning
-            if (wfHistory.isLive() && !wfHistory.clickSeek(get_relative_y(evt))) {
+            // Clicking further down the waterfall also jumps back to that
+            // moment and starts playing it, instead of only tuning, even
+            // while already replaying
+            if (!wfHistory.clickSeek(get_relative_y(evt))) {
                 UI.showBubble('No longer in waterfall history');
             }
         } else {
