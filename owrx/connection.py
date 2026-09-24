@@ -15,7 +15,6 @@ from owrx.property import PropertyStack, PropertyDeleted
 from owrx.modes import Modes, DigitalMode
 from owrx.config import Config
 from owrx.waterfall import WaterfallOptions
-from owrx.iqrecorder import IqRecorder
 from owrx.iqreplay import IqReplay, ReplayUnavailable
 from owrx.iqbuffer import IqTimeShiftBuffer, IqBufferReporter
 from owrx.websocket import Handler
@@ -147,7 +146,6 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         "tuning_precision",
         "allow_center_freq_changes",
         "allow_audio_recording",
-        "allow_iq_recording",
         "iq_buffer_seconds",
         "allow_chat",
         "callsign_url",
@@ -166,7 +164,6 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         self.sdr = None
         self.configSubs = []
         self.bookmarkSub = None
-        self.iqRecorder = None
         self.iqBuffer = None
         self.iqReplay = None
         self.replayLock = threading.Lock()
@@ -370,14 +367,6 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
                         self.startReplay(params.get("age_ms"), params.get("id"))
                     else:
                         self.stopReplay()
-                elif message["type"] == "iqrecord":
-                    params = message["params"] if "params" in message else {}
-                    if params.get("action") == "start":
-                        self.startIqRecording(params.get("key"))
-                    elif params.get("action") == "save":
-                        self.saveIqBuffer(params.get("seconds"), params.get("key"))
-                    else:
-                        self.stopIqRecording()
                 elif message["type"] == "connectionproperties":
                     if "params" in message:
                         self.connectionProperties.update(message["params"])
@@ -396,61 +385,6 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
 
         except json.JSONDecodeError:
             logger.warning("message is not json: {0}".format(message))
-
-    # Returns error message if user is not allowed to record IQ, else None
-    def checkIqRecordingAccess(self, key: str = None):
-        pm = Config.get()
-        if not pm["allow_iq_recording"]:
-            return "IQ recording is disabled"
-        # If the magic key is set, only allow recording with a matching key
-        magic = pm["magic_key"]
-        if magic != "" and key != magic:
-            return "Magic key required"
-        return None
-
-    def startIqRecording(self, key: str = None):
-        pm = Config.get()
-        error = self.checkIqRecordingAccess(key)
-        if error is not None:
-            self.write_iq_recording({"recording": False, "error": error})
-            return
-        if self.iqRecorder is not None and self.iqRecorder.running:
-            self.write_iq_recording(self.iqRecorder.getStatus())
-            return
-        if self.sdr is None:
-            self.write_iq_recording({"recording": False, "error": "No SDR selected"})
-            return
-        recorder = IqRecorder(self.sdr, pm["iq_recording_max_mb"] * 1024 * 1024, self.write_iq_recording)
-        try:
-            recorder.start()
-        except Exception as e:
-            self.write_iq_recording({"recording": False, "error": str(e)})
-            return
-        self.iqRecorder = recorder
-        self.write_iq_recording(recorder.getStatus())
-
-    def saveIqBuffer(self, seconds=None, key: str = None):
-        error = self.checkIqRecordingAccess(key)
-        if error is None and self.iqBuffer is None:
-            error = "IQ time-shift buffer is disabled"
-        if error is not None:
-            self.write_iq_saved({"file": None, "error": error})
-            return
-        maxSeconds = Config.get()["iq_buffer_seconds"]
-        try:
-            seconds = min(float(seconds), maxSeconds) if seconds is not None else maxSeconds
-        except (TypeError, ValueError):
-            seconds = maxSeconds
-        buffer = self.iqBuffer
-
-        def save():
-            status = buffer.save(seconds)
-            # Do not report back to a client that has disconnected meanwhile
-            if not self.closed:
-                self.write_iq_saved(status)
-
-        # Writing hundreds of megabytes takes time, do not block the socket
-        threading.Thread(target=save, name="iq-timeshift-save").start()
 
     # Replay buffered IQ into this client's demodulator, from AGE_MS ago,
     # so that the user can listen anywhere in the spectrum in the past
@@ -493,7 +427,7 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
             self.write_replay({"id": requestId, "active": False, "error": error})
 
     def _onIqConfigChange(self, changes):
-        if "allow_iq_recording" in changes or "iq_buffer_seconds" in changes:
+        if "iq_buffer_seconds" in changes:
             self.startIqBuffer()
 
     def startIqBuffer(self):
@@ -501,7 +435,6 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         if self.closed:
             return
         pm = Config.get()
-        # The buffer is used both for saving and replaying IQ data
         if self.sdr is not None and pm["iq_buffer_seconds"] > 0:
             try:
                 self.iqBuffer = IqTimeShiftBuffer.acquire(self.sdr)
@@ -515,14 +448,6 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         if self.iqBuffer is not None:
             IqTimeShiftBuffer.release(self.iqBuffer)
             self.iqBuffer = None
-
-    def stopIqRecording(self, notify: bool = True):
-        if self.iqRecorder is not None:
-            # Do not report back to a client that has disconnected
-            if not notify:
-                self.iqRecorder.onStop = None
-            self.iqRecorder.stop()
-            self.iqRecorder = None
 
     def setProfile(self, sdr: str, profile: str, key: str = None):
         # Set new SDR source
@@ -568,7 +493,6 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
             return
 
         self.stopDsp()
-        self.stopIqRecording()
         self.stopIqBuffer()
         self.stack.removeLayerByPriority(0)
 
@@ -603,7 +527,6 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
 
     def close(self, error: bool = False):
         self.closed = True
-        self.stopIqRecording(notify=False)
         self.stopIqBuffer()
         if self.sdr is not None:
             self.sdr.removeClient(self)
@@ -695,18 +618,12 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
     def write_bands(self, bands):
         self.send({"type": "bands", "value": bands})
 
-    def write_iq_recording(self, status):
-        self.send({"type": "iq_recording", "value": status})
-
     def write_iq_buffer(self, status):
         # Status updates are not important enough to block on
         self.mp_send({"type": "iq_buffer", "value": status})
 
     def write_replay(self, status):
         self.send({"type": "replay", "value": status})
-
-    def write_iq_saved(self, status):
-        self.send({"type": "iq_saved", "value": status})
 
     def write_log_message(self, message):
         self.send({"type": "log_message", "value": message})

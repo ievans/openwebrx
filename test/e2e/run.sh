@@ -46,5 +46,5 @@ done
 
 # Run the given test files, or all of them
 if [ $# -gt 0 ]; then TESTS=("$@"); else TESTS=(test/e2e/*.test.js); fi
-OWRX_URL="http://127.0.0.1:$PORT" OWRX_FILES="$WORK/files" \
+OWRX_URL="http://127.0.0.1:$PORT" \
     node --test --test-concurrency=1 "${TESTS[@]}"

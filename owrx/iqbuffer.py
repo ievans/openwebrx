@@ -1,13 +1,10 @@
 from owrx.source import SdrSourceEventClient, SdrSourceState, SdrClientClass
-from owrx.iqrecorder import IqRecorder, makeSigmfCapture, writeSigmfMeta
-from owrx.storage import Storage
 from owrx.config import Config
 from collections import deque
 from datetime import datetime, timezone
 
 import threading
 import time
-import os
 
 import logging
 
@@ -16,14 +13,15 @@ logger = logging.getLogger(__name__)
 
 #
 # Keeps the last few seconds of raw IQ data from an SDR source in memory,
-# so that users can save what has ALREADY happened (e.g. a signal that
-# just went by) into a SigMF recording. One buffer is shared by all users
-# of an SDR source. The buffer never keeps an SDR running by itself, it
+# so that users can rewind and listen anywhere in the spectrum in the
+# past (see IqReplay). One buffer is shared by all users of an SDR source. The buffer never keeps an SDR running by itself, it
 # only listens while the SDR is running for other reasons.
 #
 class IqTimeShiftBuffer(SdrSourceEventClient):
     sharedBuffers = {}
     sharedLock = threading.Lock()
+    # Complex float32 samples
+    BYTES_PER_SAMPLE = 8
 
     # Acquire shared buffer for the given SDR source
     @staticmethod
@@ -52,7 +50,6 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
         self.sdrSource  = sdrSource
         self.users      = 0
         self.lock       = threading.Lock()
-        self.saveLock   = threading.Lock()
         # Chunk = (datetime, center_freq, bytes, monotonic time, sequence number)
         self.chunks     = deque()
         self.seq        = 0         # sequence number of the next chunk
@@ -85,7 +82,7 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
             self.size = 0
 
     def getMaxBytes(self):
-        return int(Config.get()["iq_buffer_seconds"] * self.sampleRate * IqRecorder.BYTES_PER_SAMPLE)
+        return int(Config.get()["iq_buffer_seconds"] * self.sampleRate * IqTimeShiftBuffer.BYTES_PER_SAMPLE)
 
     # Fill level, for display: buffered and maximum seconds and bytes
     def getStatus(self):
@@ -93,7 +90,7 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
         with self.lock:
             size = self.size
             rate = self.sampleRate
-        perSecond = rate * IqRecorder.BYTES_PER_SAMPLE
+        perSecond = rate * IqTimeShiftBuffer.BYTES_PER_SAMPLE
         return {
             "seconds": size / perSecond if perSecond else 0,
             "max_seconds": maxBytes / perSecond if perSecond else 0,
@@ -106,11 +103,11 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
         with self.lock:
             if not self.sampleRate:
                 return 0
-            return self.size / IqRecorder.BYTES_PER_SAMPLE / self.sampleRate
+            return self.size / IqTimeShiftBuffer.BYTES_PER_SAMPLE / self.sampleRate
 
     def _onSampleRateChange(self, changes):
         if "samp_rate" in changes:
-            # Samples at different rates can not be mixed in one file
+            # Samples at different rates can not be mixed
             self.clear()
             self.sampleRate = changes["samp_rate"]
 
@@ -152,7 +149,7 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
             # A chunk's time is when its last sample arrived, so allow the
             # first chunk to cover a little time before it
             first = self.chunks[0]
-            if target < first[3] - len(first[2]) / IqRecorder.BYTES_PER_SAMPLE / max(self.sampleRate, 1):
+            if target < first[3] - len(first[2]) / IqTimeShiftBuffer.BYTES_PER_SAMPLE / max(self.sampleRate, 1):
                 return None
             lo, hi = 0, len(self.chunks) - 1
             while lo < hi:
@@ -173,66 +170,6 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
             if index < 0:
                 raise LookupError("IQ data no longer buffered")
             return self.chunks[index]
-
-    # Save up to the given number of most recent seconds into a new
-    # SigMF recording. Returns status dictionary.
-    def save(self, seconds: float):
-        # Only one save at a time, so that repeated requests can not
-        # flood the storage with parallel multi-megabyte writes
-        if not self.saveLock.acquire(blocking=False):
-            return {"file": None, "size": 0, "seconds": 0, "error": "Already saving IQ buffer"}
-        try:
-            return self._save(seconds)
-        finally:
-            self.saveLock.release()
-
-    def _save(self, seconds: float):
-        # Take a snapshot of the data (chunks are immutable)
-        wanted = int(seconds * self.sampleRate) * IqRecorder.BYTES_PER_SAMPLE
-        with self.lock:
-            sampleRate = self.sampleRate
-            chunks = []
-            total = 0
-            for chunk in reversed(self.chunks):
-                if total >= wanted:
-                    break
-                chunks.append(chunk)
-                total += len(chunk[2])
-            chunks.reverse()
-
-        if not chunks:
-            return {"file": None, "size": 0, "seconds": 0, "error": "No IQ data buffered yet"}
-
-        # Start writing at a sample boundary, trimming excess from the front
-        excess = total - wanted if total > wanted else 0
-        excess -= excess % IqRecorder.BYTES_PER_SAMPLE
-
-        fileName = Storage.makeFileName("IQ-{0}", chunks[0][1]) + ".sigmf-data"
-        captures = []
-        size = 0
-        try:
-            with Storage.getSharedInstance().newFile(fileName) as f:
-                dataPath = f.name
-                for i, (timestamp, cf, data, _, _) in enumerate(chunks):
-                    if i == 0 and excess > 0:
-                        data = data[excess:]
-                    if not captures or captures[-1]["core:frequency"] != cf:
-                        captures.append(makeSigmfCapture(size // IqRecorder.BYTES_PER_SAMPLE, cf, timestamp))
-                    f.write(data)
-                    size += len(data)
-            writeSigmfMeta(dataPath, sampleRate, captures, self.sdrSource)
-        except Exception as e:
-            logger.exception("Exception saving IQ buffer")
-            return {"file": None, "size": 0, "seconds": 0, "error": str(e)}
-
-        Storage.getSharedInstance().cleanStoredFiles()
-        logger.info("Saved %d bytes of buffered IQ to '%s'.", size, dataPath)
-        return {
-            "file": os.path.basename(dataPath),
-            "size": size,
-            "seconds": size / IqRecorder.BYTES_PER_SAMPLE / sampleRate,
-            "error": None,
-        }
 
     # SdrSourceEventClient interface
 

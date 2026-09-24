@@ -147,12 +147,63 @@ test('the IQ buffer limit is marked on the waterfall once there is enough histor
     await page.close();
 });
 
+// Every distinct position SELECTOR took on screen, checked on every frame
+// the browser painted during the next MS milliseconds
+function markerPositions(page, selector, ms) {
+    return page.evaluate(([selector, ms]) => new Promise(resolve => {
+        const tops = new Set();
+        const end = performance.now() + ms;
+        const sample = () => {
+            const $m = $(selector);
+            tops.add($m.is(':visible') ? $m.css('top') : 'hidden');
+            if (performance.now() < end) requestAnimationFrame(sample); else resolve([...tops]);
+        };
+        requestAnimationFrame(sample);
+    }), [selector, ms]);
+}
+
+test('playhead and IQ buffer lines hold still on screen while replaying at 1x', async () => {
+    const page = await h.openReceiver(browser);
+    await page.waitForTimeout(15000);    // more than the 12s IQ buffer
+    await clickWaterfall(page, h.CARRIER, 40);
+    await page.waitForTimeout(500);
+    const [playhead, buffer] = await Promise.all([
+        markerPositions(page, '#openwebrx-replay-position-marker', 6000),
+        markerPositions(page, '#openwebrx-iq-buffer-marker', 6000),
+    ]);
+    assert.deepStrictEqual(playhead, ['40px'], 'playhead line moved: ' + playhead);
+    assert.strictEqual(buffer.length, 1, 'IQ buffer line moved: ' + buffer);
+    assert.notStrictEqual(buffer[0], 'hidden');
+    await page.keyboard.press('End');
+    assert.deepStrictEqual(page.errors, []);
+    await page.close();
+});
+
+test('clicking below the IQ buffer line snaps playback to it, and audio replays', async () => {
+    const page = await h.openReceiver(browser);
+    await page.evaluate(f => { UI.setModulation('nfm'); UI.setFrequency(f, false); }, h.CARRIER);
+    await page.waitForTimeout(15000);
+    const line = await page.evaluate(() => $('#openwebrx-iq-buffer-marker').css('top'));
+    assert.ok(parseFloat(line) > 0 && parseFloat(line) < 130, 'buffer line placed: ' + line);
+
+    await clickWaterfall(page, h.CARRIER, 130);   // well below the line
+
+    assert.strictEqual(await page.evaluate(() => $('#openwebrx-replay-position-marker').css('top')), line, 'playhead snapped to the buffer line');
+    await page.waitForFunction(() => wfHistory.serverReplay !== 'pending', null, { timeout: 5000 });
+    const replay = await page.evaluate(() => ({ state: wfHistory.serverReplay, error: wfHistory.replayError }));
+    assert.strictEqual(replay.state, 'active', 'server replays from the snapped position: ' + JSON.stringify(replay));
+    assert.ok(audible(await h.audioOutput(page)), 'replayed audio plays');
+
+    await page.keyboard.press('End');
+    assert.deepStrictEqual(page.errors, []);
+    await page.close();
+});
+
 test('clicking further down while already replaying also seeks, relative to now', async () => {
     const page = await h.openReceiver(browser);
     await page.evaluate(f => { UI.setModulation('nfm'); UI.setFrequency(f, false); }, h.CARRIER);
     await page.waitForTimeout(15000);
-    await page.evaluate(() => wfHistory.skip(-3));
-    await page.keyboard.press('w');   // paused after seeking: play
+    await page.evaluate(() => wfHistory.skip(-3));   // keeps playing
     await page.waitForFunction(() => wfHistory.serverReplay === 'active', null, { timeout: 5000 });
     const before = await page.evaluate(() => wfHistory.playT);
 
@@ -183,8 +234,7 @@ test('while replaying, tune anywhere and hear that frequency as it was then', as
     await page.waitForTimeout(15000);
     // About 9 seconds back (with latency): 1.5 periods of the burst, so
     // the past and live burst are in opposite states and easy to tell apart
-    await page.evaluate(() => wfHistory.skip(-8.5));
-    await page.keyboard.press('w');   // paused after seeking: play
+    await page.evaluate(() => wfHistory.skip(-8.5));   // keeps playing
     await page.waitForFunction(() => wfHistory.serverReplay === 'active', null, { timeout: 5000 });
     // Now tune to the burst by clicking it on the waterfall, right at the
     // top (dead zone) so this only retunes and does not also seek
@@ -212,33 +262,31 @@ test('while replaying, tune anywhere and hear that frequency as it was then', as
     await page.close();
 });
 
-test('beyond the IQ buffer, playback falls back to the recorded audio of the tuned frequency', async () => {
+test('skipping back past the IQ buffer stops at its line, where the server still replays', async () => {
     const page = await h.openReceiver(browser);
     await page.evaluate(f => { UI.setModulation('nfm'); UI.setFrequency(f, false); }, h.BURST);
     await page.waitForTimeout(20000);
     // 15 seconds back is older than the server's 12 second IQ buffer
-    await page.evaluate(() => wfHistory.skip(-15));
-    await page.keyboard.press('w');   // paused after seeking: play
-    await page.waitForFunction(() => wfHistory.serverReplay === 'failed', null, { timeout: 5000 });
-    assert.match(await page.evaluate(() => wfHistory.replayError), /No IQ data buffered/);
+    await page.evaluate(() => wfHistory.skip(-15));   // keeps playing
+    const pos = await page.evaluate(() => ({
+        playhead: $('#openwebrx-replay-position-marker').css('top'),
+        line: $('#openwebrx-iq-buffer-marker').css('top'),
+        speed: wfHistory.speed,
+    }));
+    assert.strictEqual(pos.playhead, pos.line, 'stopped at the buffer line: ' + JSON.stringify(pos));
+    assert.strictEqual(pos.speed, 1);
+    await page.waitForFunction(() => wfHistory.serverReplay !== 'pending', null, { timeout: 5000 });
+    assert.strictEqual(await page.evaluate(() => wfHistory.serverReplay), 'active',
+        'server replays: ' + await page.evaluate(() => wfHistory.replayError));
     const age = await page.evaluate(() => Date.now() - wfHistory.playT);
     const start = await page.evaluate(() => Date.now());
     await page.waitForTimeout(8000);
     const out = await page.evaluate(start => window.__audio.filter(x => x[0] > start + 1000), start);
     const r = followsBurst(out, age);
-    console.log('# fallback: audio follows the burst as it was ' + (age / 1000).toFixed(1) + 's ago: ' + Math.round(r.past) + '%, live: ' + Math.round(r.live) + '% (' + r.n + ' buffers)');
+    console.log('# at the buffer line: audio follows the burst as it was ' + (age / 1000).toFixed(1) + 's ago: ' + Math.round(r.past) + '%, live: ' + Math.round(r.live) + '% (' + r.n + ' buffers)');
     assert.ok(r.n > 30, 'compared ' + r.n + ' buffers');
-    assert.ok(r.past >= 90, 'follows the recorded burst only ' + Math.round(r.past) + '%');
-    assert.ok(r.live <= 60, 'follows the live burst ' + Math.round(r.live) + '%');
-
-    // Tuning elsewhere (dead zone: only retune, do not also seek):
-    // nothing was recorded there, so nothing must play
-    await clickWaterfall(page, h.CARRIER, 2);
-    await page.waitForTimeout(500);
-    const other = await h.audioOutput(page, 2000);
-    assert.ok(other.buffers === 0 || other.rms === 0, 'played audio from another frequency: ' + JSON.stringify(other));
-    await page.waitForTimeout(300);
-    assert.strictEqual(await page.evaluate(() => wfHistory.localMismatch), true, 'no recorded audio at this frequency');
+    assert.ok(r.past >= 90, 'follows the past burst only ' + Math.round(r.past) + '%');
+    await page.keyboard.press('End');
     assert.deepStrictEqual(page.errors, []);
     await page.close();
 });

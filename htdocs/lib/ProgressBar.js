@@ -208,13 +208,7 @@ IqBufferProgressBar = function(el) {
 IqBufferProgressBar.prototype = new ProgressBar();
 
 IqBufferProgressBar.prototype.getDefaultText = function() {
-    return 'IQ buffer [off]';
-};
-
-IqBufferProgressBar.prototype.setOff = function() {
-    this.set(0, 'IQ buffer [off]', false);
-    this.$el.attr('title', 'IQ time-shift buffer is off. An admin can set its length ' +
-        'under Settings > General. It lets you tune anywhere while replaying the waterfall.');
+    return 'IQ buffer';
 };
 
 IqBufferProgressBar.prototype.setStatus = function(status) {

@@ -30,7 +30,19 @@ function WaterfallHistory() {
     // TRUE when locally remembered audio exists, but for another frequency
     this.localMismatch = false;
     this.lastUi   = 0;
+    // Rows down from the top of the waterfall where the IQ buffer line is
+    // drawn, or -1 when not shown
+    this.bufferRows = -1;
 }
+
+// Lines arrive with network jitter, so their arrival times are off by up
+// to this much. Markers are kept on their waterfall row and only re-placed
+// from timestamps once they are off by more than this.
+WaterfallHistory.JITTER_MS = 1000;
+
+// The server keeps dropping its oldest IQ data, so playback started right
+// at the edge of its buffer would fail. Stay this far inside it.
+WaterfallHistory.EDGE_MARGIN_MS = 2000;
 
 WaterfallHistory.prototype.isLive = function() {
     return this.live;
@@ -52,10 +64,15 @@ WaterfallHistory.prototype.push = function(data) {
     }
     this.frames.push({ t: Date.now(), cf: center_freq, bw: bandwidth, d: d });
     this.bytes += d.byteLength;
+    // The waterfall just scrolled down one row, and at 1x the playhead
+    // moves forward by one line in the same time, so it stays on the same
+    // screen row. Looking the line up by arrival time instead makes the
+    // playhead jitter up and down with the network.
+    if (!this.live && this.speed == 1) {
+        this.cursor = Math.min(this.cursor + 1, this.frames.length - 1);
+    }
     this.evict();
 
-    // The waterfall scrolls by one row on every line, so the markers must
-    // move in lockstep too, or they visibly lag and then jump to catch up
     this.updateBufferMarker();
     this.updatePlayheadMarker();
 
@@ -137,7 +154,7 @@ WaterfallHistory.prototype.skip = function(seconds) {
     var speed = this.speed || 1;
     if (!this.freeze()) return;
     var t = this.frames[this.cursor].t + seconds * 1000;
-    this.cursor = this.indexAt(t);
+    this.cursor = Math.max(this.indexAt(t), this.oldestPlayable());
     this.playT  = this.frames[this.cursor].t;
     this.audioT = null;
     if (this.cursor >= this.frames.length - 1 && seconds > 0) {
@@ -154,18 +171,29 @@ WaterfallHistory.prototype.skip = function(seconds) {
 // straight to that moment in time and start playing right away, instead
 // of having to pause and skip back. relativeY is measured in pixels down
 // from the top of the waterfall, where 0 is "now" and each row further
-// down is one frame further into the past. Returns FALSE if that time is
-// no longer buffered.
+// down is one frame further into the past. Clicks further back than audio
+// can be replayed snap to the oldest point that still can. Returns FALSE
+// if there is no history yet.
 WaterfallHistory.prototype.clickSeek = function(relativeY) {
     // A click right at the top is just tuning, not a time jump
     if (relativeY < 5) return true;
     if (this.frames.length < 2) return false;
-    var idx = this.frames.length - 1 - Math.round(relativeY);
-    if (idx < 0) return false;
     if (!this.freeze()) return false;
-    this.cursor = idx;
+    this.cursor = Math.max(0, this.frames.length - 1 - Math.round(relativeY));
+    // Snaps to the oldest playable point if that is too far back
     this.setSpeed(1);
     return true;
+};
+
+// Index of the oldest frame that playback may start from: the IQ buffer
+// line when the server replays audio, else the oldest frame.
+WaterfallHistory.prototype.oldestPlayable = function() {
+    if (!this.canReplayOnServer()) return 0;
+    var rows = this.updateBufferRows();
+    if (rows >= 0) return this.frames.length - 1 - rows;
+    // The server's buffer reaches back further than the waterfall history,
+    // but may have started at the same time, so keep off its edge anyway
+    return this.firstIndexFrom(this.frames[0].t + WaterfallHistory.EDGE_MARGIN_MS);
 };
 
 // Move the playhead to time T, with a few seconds after T so that
@@ -192,9 +220,19 @@ WaterfallHistory.prototype.indexAt = function(t) {
     return lo;
 };
 
+// Find the oldest frame not older than time T (the newest frame if none).
+WaterfallHistory.prototype.firstIndexFrom = function(t) {
+    var i = this.indexAt(t);
+    if (this.frames[i].t < t) ++i;
+    return Math.min(i, this.frames.length - 1);
+};
+
 // Play back at given speed (1 = realtime, -1 = realtime reverse, 0 = stop).
 WaterfallHistory.prototype.setSpeed = function(speed) {
     if (speed != 0 && !this.freeze()) return;
+    // Never start playing where there is no audio to replay anymore, e.g.
+    // after a click below the IQ buffer line or a long pause
+    if (speed == 1) this.cursor = Math.max(this.cursor, this.oldestPlayable());
     this.speed = speed;
     if (this.timer) {
         clearInterval(this.timer);
@@ -299,8 +337,14 @@ WaterfallHistory.prototype.tick = function() {
                 if (r.played || r.skipped) this.localMismatch = !r.played;
             }
             this.audioT = t;
+            // push() keeps the playhead on its row; only re-place it if
+            // it has drifted from the audio position beyond network jitter
+            if (Math.abs(this.frames[this.cursor].t - t) > WaterfallHistory.JITTER_MS) {
+                this.cursor = this.indexAt(t);
+            }
+        } else {
+            this.cursor = this.indexAt(t);
         }
-        this.cursor = this.indexAt(t);
     } else {
         var prev = this.indexAt(t);
         if (prev <= 0) {
@@ -318,30 +362,38 @@ WaterfallHistory.prototype.tick = function() {
     if (now - this.lastUi > 250) this.updateUi();
 };
 
-// Mark on the (always live) waterfall how far back the server's IQ buffer
-// reaches, so it is clear at a glance how far one can click/rewind and
-// still hear replayed audio, not just see the past spectrum.
+// The IQ buffer line marks how far back one can click/rewind and still
+// hear server replayed audio: the oldest frame a little inside the edge of
+// the server's buffer. Like the playhead, it stays on its screen row as
+// the waterfall scrolls, and is only re-placed once line arrival jitter
+// can not explain the difference. Returns its row, or -1 while the buffer
+// reaches back beyond the history.
+WaterfallHistory.prototype.updateBufferRows = function() {
+    var n = this.frames.length;
+    if (!this.canReplayOnServer() || n < 2) return this.bufferRows = -1;
+    var edgeT = this.frames[n - 1].t - iq_buffer_seconds * 1000;
+    if (edgeT < this.frames[0].t) return this.bufferRows = -1;
+    var limitT = edgeT + WaterfallHistory.EDGE_MARGIN_MS;
+    var rows = this.bufferRows;
+    if (rows >= 0 && rows < n && Math.abs(this.frames[n - 1 - rows].t - limitT) <= WaterfallHistory.JITTER_MS) {
+        return rows;
+    }
+    return this.bufferRows = (n - 1) - this.firstIndexFrom(limitT);
+};
+
 WaterfallHistory.prototype.updateBufferMarker = function() {
     var $marker = $('#openwebrx-iq-buffer-marker');
-    if (!this.canReplayOnServer() || this.frames.length < 2 ||
-        typeof canvas_container === 'undefined' || !canvas_container) {
+    var rows = this.updateBufferRows();
+    if (rows <= 0 || typeof canvas_container === 'undefined' || !canvas_container ||
+        rows >= canvas_container.clientHeight) {
         $marker.hide();
         return;
     }
 
-    var topT     = this.frames[this.frames.length - 1].t;
-    var limitT   = topT - iq_buffer_seconds * 1000;
-    var limitIdx = this.indexAt(limitT);
-    var height   = canvas_container.clientHeight;
-    var offset   = (this.frames.length - 1) - limitIdx;
-
-    if (limitT < this.frames[0].t || offset <= 0 || offset >= height) {
-        $marker.hide();
-    } else {
-        var seconds = Math.round((topT - this.frames[limitIdx].t) / 1000);
-        $marker.find('span').text('buffer at ' + seconds + 's');
-        $marker.css('top', offset + 'px').show();
-    }
+    var n = this.frames.length;
+    var seconds = Math.round((this.frames[n - 1].t - this.frames[n - 1 - rows].t) / 1000);
+    $marker.find('span').text('buffer at ' + seconds + 's');
+    $marker.css('top', rows + 'px').show();
 };
 
 // Mark on the (always live) waterfall exactly where the playhead (the

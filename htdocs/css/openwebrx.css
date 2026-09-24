@@ -2346,16 +2346,6 @@ img.openwebrx-mirror-img
     align-self: center;
 }
 
-.openwebrx-tool-status {
-    font-size: 9pt;
-    display: flex;
-    justify-content: space-between;
-}
-
-#openwebrx-iq-record-label {
-    color: #ff8080;
-}
-
 #openwebrx-history-overlay {
     position: absolute;
     top: 6px;
