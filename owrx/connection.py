@@ -200,7 +200,9 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         self.write_modes(modes)
 
         self.configSubs.append(SdrService.getActiveSources().wire(self._onSdrDeviceChanges))
-        self.configSubs.append(Config.get().filter("iq_buffer_seconds").wire(lambda *args: self.startIqBuffer()))
+        # Not Config.get().filter(), which would stay wired to the global
+        # config after this client disconnects
+        self.configSubs.append(Config.get().wire(self._onIqConfigChange))
         self.configSubs.append(SdrService.getAvailableProfiles().wire(self._sendProfiles))
         self._sendProfiles()
 
@@ -423,6 +425,10 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
                 self.iqReplay = None
         if not self.closed:
             self.write_replay({"id": requestId, "active": False, "error": error})
+
+    def _onIqConfigChange(self, changes):
+        if "iq_buffer_seconds" in changes:
+            self.startIqBuffer()
 
     def startIqBuffer(self):
         self.stopIqBuffer()

@@ -55,3 +55,13 @@ class IqTimeShiftBufferTest(TestCase):
         self.assertIsNone(buf.reader)
         self.assertNotIn(buf, self.source.clients)
         self.assertNotIn(self.source.getId(), IqTimeShiftBuffer.sharedBuffers)
+
+    def testSwitchingDoesNotLeakPropertySubscriptions(self):
+        # Every switch away from and back to an SDR stops and restarts
+        # the buffer; nothing must stay wired to the SDR's properties
+        before = len(self.source.props.subscribers)
+        for _ in range(5):
+            buf = IqTimeShiftBuffer.acquire(self.source)
+            self.source.props["center_freq"] = 146000000
+            IqTimeShiftBuffer.release(buf)
+        self.assertEqual(len(self.source.props.subscribers), before)
