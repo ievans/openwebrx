@@ -16,8 +16,8 @@ async function launch() {
     });
 }
 
-// Open the receiver page with audio running and the Scan & Replay section
-// visible, and tap the audio output to measure what would be heard.
+// Open the receiver page with audio running and the Scan & IQ Recording
+// sections visible, and tap the audio output to measure what would be heard.
 async function openReceiver(browser) {
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
     page.errors = [];
@@ -70,13 +70,15 @@ async function waterfallMoving(page) {
     return a !== await waterfall(page);
 }
 
+// The waterfall never freezes: it always shows live data, and a moving
+// "playhead" line marks the replay position on top of it instead. The
+// banner is a plain "back to live" prompt, so its text barely varies -
+// tests mostly care whether it is shown at all.
 function historyState(page) {
     return page.evaluate(() => ({
         live: wfHistory.isLive(),
         speed: wfHistory.speed,
-        pauseLit: $('.openwebrx-history-button').hasClass('highlighted'),
-        playIcon: $('.openwebrx-history-button').text() === '\u25b6',
-        liveLit: $('.openwebrx-live-button').hasClass('highlighted'),
+        playheadVisible: $('#openwebrx-replay-position-marker').is(':visible'),
         badge: $('#openwebrx-history-overlay').is(':visible') ? $('#openwebrx-history-overlay').text().replace(/\s+/g, ' ').trim() : '',
     }));
 }

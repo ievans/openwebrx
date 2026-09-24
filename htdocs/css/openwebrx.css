@@ -687,23 +687,18 @@ img.openwebrx-mirror-img
 	margin: 0 0 0 5.9px;
 	padding: 0px;
 	background-color:rgba(0, 0, 0, 0);
-	display: flex;
-	flex-wrap: wrap;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, 220px);
 	gap: 4px;
 }
 
+/* A uniform 220px fits every status bar's label, including the longest
+   ("Server Memory [100% 999/999GB]"), so every cell in the grid matches */
 #openwebrx-panel-status div.openwebrx-progressbar
 {
-	width: 200px;
+	width: 220px;
 	height: 20px;
 	margin: 0;
-}
-
-/* memory readout ("System memory [100% 999/999GB]") is the longest label of the
-   status bars and clips at 200px on systems with 3-digit GB amounts */
-#openwebrx-panel-status div.openwebrx-progressbar#openwebrx-bar-server-memory
-{
-	width: 220px;
 }
 
 #openwebrx-panel-receiver
