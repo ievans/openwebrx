@@ -1,5 +1,6 @@
 **1.2.124**
 - Renamed "Server memory" status field to "System memory" and fixed its text overflowing on systems with large amounts of RAM.
+- "System memory" now reports the container's cgroup memory limit when running under one, instead of always showing whole-host memory.
 - Added plugin APIs for buttons, windows, sections.
 - Added optional pointer frequency display.
 - Added Soapy source for IQ files and streams [f-and].

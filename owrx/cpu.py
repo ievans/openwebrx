@@ -94,8 +94,15 @@ class CpuUsageThread(threading.Thread):
             self.endEvent.wait(timeout=3)
         logger.debug("cpu usage thread shut down")
 
-    # System memory in use and total, in bytes, or None if unknown
+    # Memory in use and total, in bytes, or None if unknown. Prefers the
+    # cgroup memory limit (i.e. what a container is actually confined to)
+    # and falls back to whole-system memory when there is no such limit,
+    # e.g. on bare metal or in an unrestricted container.
     def get_memory(self):
+        return self._get_memory_cgroup() or self._get_memory_proc()
+
+    # System memory in use and total, in bytes, or None if unknown
+    def _get_memory_proc(self):
         try:
             info = {}
             with open("/proc/meminfo", "r") as f:
@@ -107,6 +114,67 @@ class CpuUsageThread(threading.Thread):
             return {"used": total - available, "total": total}
         except Exception:
             return None
+
+    # Total system memory in bytes, or None if unknown. Only used to tell an
+    # actual cgroup memory limit apart from the "no limit" case, which is
+    # reported as a sentinel far larger than any real amount of memory.
+    def _get_host_memory_total(self):
+        try:
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    key, value = line.split(":", 1)
+                    if key == "MemTotal":
+                        return int(value.split()[0]) * 1024
+        except Exception:
+            pass
+        return None
+
+    # Memory in use and the cgroup memory limit, in bytes, for the cgroup
+    # this process is confined to. Returns None if there is no memory
+    # controller, or it reports no limit (not actually memory-constrained).
+    def _get_memory_cgroup(self):
+        host_total = self._get_host_memory_total()
+
+        # cgroup v2 (unified hierarchy)
+        try:
+            with open("/sys/fs/cgroup/memory.max", "r") as f:
+                limit = f.read().strip()
+            if limit != "max":
+                total = int(limit)
+                if host_total is None or total < host_total:
+                    with open("/sys/fs/cgroup/memory.current", "r") as f:
+                        usage = int(f.read().strip())
+                    inactive = self._read_cgroup_stat("/sys/fs/cgroup/memory.stat", "inactive_file")
+                    return {"used": max(usage - inactive, 0), "total": total}
+        except Exception:
+            pass
+
+        # cgroup v1
+        try:
+            with open("/sys/fs/cgroup/memory/memory.limit_in_bytes", "r") as f:
+                total = int(f.read().strip())
+            if host_total is None or total < host_total:
+                with open("/sys/fs/cgroup/memory/memory.usage_in_bytes", "r") as f:
+                    usage = int(f.read().strip())
+                cache = self._read_cgroup_stat("/sys/fs/cgroup/memory/memory.stat", "total_inactive_file")
+                return {"used": max(usage - cache, 0), "total": total}
+        except Exception:
+            pass
+
+        return None
+
+    # Reads a single "key value" stat out of a cgroup memory.stat file
+    @staticmethod
+    def _read_cgroup_stat(path, key):
+        try:
+            with open(path, "r") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) == 2 and parts[0] == key:
+                        return int(parts[1])
+        except Exception:
+            pass
+        return 0
 
     def get_temperature(self):
         # Must have temperature file
