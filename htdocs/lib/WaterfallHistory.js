@@ -1,9 +1,11 @@
 //
 // Waterfall History
 //
-// Keeps a ring buffer of received FFT lines so that the waterfall can be
-// paused, rewound, scrubbed and played back at different speeds, while
-// live data keeps being recorded in the background. Lines are stored as
+// Keeps a ring buffer of received FFT lines, decoupled from what the
+// waterfall displays: the waterfall (and spectrum) always keep showing
+// live data, scrolling continuously. A "playhead" line marks where in
+// that scrolling waterfall the current replay position is, while audio
+// follows the replay position instead of live data. Lines are stored as
 // 16bit integers (0.01dB resolution) to save memory.
 //
 
@@ -13,7 +15,7 @@ function WaterfallHistory() {
     this.maxBytes = 64 * 1024 * 1024;
     this.maxAge   = 10 * 60 * 1000;
     this.live     = true;
-    this.cursor   = -1;     // index of the newest displayed frame
+    this.cursor   = -1;     // index of the frame the playhead is on
     this.speed    = 0;      // playback speed, negative for reverse
     this.timer    = 0;
     this.lastTick = 0;
@@ -27,7 +29,6 @@ function WaterfallHistory() {
     this.replayTimer  = 0;
     // TRUE when locally remembered audio exists, but for another frequency
     this.localMismatch = false;
-    this.pending  = false;
     this.lastUi   = 0;
 }
 
@@ -41,7 +42,9 @@ WaterfallHistory.prototype.clear = function() {
     if (!this.live) this.goLive();
 };
 
-// Store a new live FFT line. Returns TRUE if it should be shown live.
+// Store a new live FFT line. The waterfall and spectrum always display it
+// live; this only keeps history for the playhead, audio replay and the
+// IQ buffer marker.
 WaterfallHistory.prototype.push = function(data) {
     var d = new Int16Array(data.length);
     for (var j = 0; j < data.length; ++j) {
@@ -51,10 +54,8 @@ WaterfallHistory.prototype.push = function(data) {
     this.bytes += d.byteLength;
     this.evict();
 
-    // Keep timeline position and labels current, but not too often
+    // Keep the playhead, buffer marker and labels current, but not too often
     if (Date.now() - this.lastUi > (this.live? 1000 : 250)) this.updateUi();
-
-    return this.live;
 };
 
 WaterfallHistory.prototype.evict = function() {
@@ -93,35 +94,12 @@ WaterfallHistory.prototype.frameData = function(i) {
     return out;
 };
 
-// Rebuild the whole waterfall image so that frame #end is the top line.
-WaterfallHistory.prototype.redraw = function(end) {
-    if (!this.frames.length || !waterfall_setup_done) return;
-    end = Math.max(0, Math.min(this.frames.length - 1, end));
-    var lines = Math.max(200, canvas_container? canvas_container.parentNode.clientHeight : 600);
-    var start = Math.max(0, end - lines + 1);
-
-    waterfall_clear();
-    for (var i = start; i <= end; ++i) waterfall_add(this.frameData(i));
-    spectrum.update(this.frameData(end));
-};
-
-// Throttle expensive full redraws to the display refresh rate.
-WaterfallHistory.prototype.requestRedraw = function() {
-    if (this.pending) return;
-    this.pending = true;
-    var me = this;
-    requestAnimationFrame(function() {
-        me.pending = false;
-        if (!me.live) me.redraw(me.cursor);
-    });
-};
-
-// Freeze the display at the newest frame, if currently live.
+// Stop tracking live audio; the playhead starts out at the newest frame.
 WaterfallHistory.prototype.freeze = function() {
     if (this.live && this.frames.length) {
         this.live   = false;
         this.cursor = this.frames.length - 1;
-        // Live audio does not match the replayed waterfall, silence it
+        // Live audio does not match the replay position, silence it
         this.updateAudio();
     }
     return !this.live;
@@ -142,7 +120,6 @@ WaterfallHistory.prototype.goLive = function() {
     this.live   = true;
     this.cursor = -1;
     this.syncAudio();
-    this.redraw(this.frames.length - 1);
     this.updateUi();
 };
 
@@ -162,36 +139,32 @@ WaterfallHistory.prototype.skip = function(seconds) {
         this.goLive();
     } else if (wasMoving) {
         this.setSpeed(speed);
-        this.requestRedraw();
     } else {
         this.syncAudio(true);
-        this.requestRedraw();
         this.updateUi();
     }
 };
 
-// Click anywhere on the waterfall (live or already replaying) to jump
+// Click anywhere on the (always live) waterfall to move the playhead
 // straight to that moment in time and start playing right away, instead
 // of having to pause and skip back. relativeY is measured in pixels down
-// from the top of the *currently displayed* waterfall, where 0 is the
-// newest visible line and each row further down is one frame further
-// into the past. Returns FALSE if that time is no longer buffered.
+// from the top of the waterfall, where 0 is "now" and each row further
+// down is one frame further into the past. Returns FALSE if that time is
+// no longer buffered.
 WaterfallHistory.prototype.clickSeek = function(relativeY) {
     // A click right at the top is just tuning, not a time jump
     if (relativeY < 5) return true;
     if (this.frames.length < 2) return false;
-    var topIdx = this.live? this.frames.length - 1 : this.cursor;
-    var idx = topIdx - Math.round(relativeY);
+    var idx = this.frames.length - 1 - Math.round(relativeY);
     if (idx < 0) return false;
     if (!this.freeze()) return false;
     this.cursor = idx;
     this.setSpeed(1);
-    this.requestRedraw();
     return true;
 };
 
-// Show the waterfall as it was at time T, with a few seconds after T
-// on top so that whatever started at T is visible. Returns FALSE if T
+// Move the playhead to time T, with a few seconds after T so that
+// whatever started at T is not immediately behind it. Returns FALSE if T
 // is no longer in the history.
 WaterfallHistory.prototype.seekTime = function(t, after = 3) {
     if (!this.frames.length || t < this.frames[0].t) return false;
@@ -200,7 +173,6 @@ WaterfallHistory.prototype.seekTime = function(t, after = 3) {
     this.cursor = this.indexAt(t + after * 1000);
     this.playT  = this.frames[this.cursor].t;
     this.audioT = null;
-    this.requestRedraw();
     this.updateUi();
     return true;
 };
@@ -308,7 +280,7 @@ WaterfallHistory.prototype.tick = function() {
     var t = this.playT;
 
     if (this.speed > 0) {
-        // Caught up with live data: switch back to live display
+        // Caught up with live data: switch back to live
         if (t >= this.frames[this.frames.length - 1].t) {
             this.goLive();
             return;
@@ -323,14 +295,8 @@ WaterfallHistory.prototype.tick = function() {
             }
             this.audioT = t;
         }
-        // Moving forward: just append new lines to the waterfall
-        var next = this.indexAt(t);
-        while (this.cursor < next) {
-            waterfall_add(this.frameData(++this.cursor));
-        }
-        spectrum.update(this.frameData(this.cursor));
+        this.cursor = this.indexAt(t);
     } else {
-        // Moving backward: have to redraw the whole waterfall
         var prev = this.indexAt(t);
         if (prev <= 0) {
             this.cursor = 0;
@@ -338,7 +304,6 @@ WaterfallHistory.prototype.tick = function() {
         } else {
             this.cursor = prev;
         }
-        this.requestRedraw();
     }
 
     if (now - this.lastUi > 250) this.updateUi();
@@ -356,9 +321,9 @@ WaterfallHistory.prototype.formatDelta = function(sec) {
     return '-' + m + ':' + ('' + s).padStart(2, '0');
 };
 
-// Mark on the waterfall itself how far back the server's IQ buffer reaches,
-// so it is clear at a glance how far one can click/rewind and still hear
-// replayed audio, not just see the past spectrum.
+// Mark on the (always live) waterfall how far back the server's IQ buffer
+// reaches, so it is clear at a glance how far one can click/rewind and
+// still hear replayed audio, not just see the past spectrum.
 WaterfallHistory.prototype.updateBufferMarker = function() {
     var $marker = $('#openwebrx-iq-buffer-marker');
     if (!this.canReplayOnServer() || this.frames.length < 2 ||
@@ -367,17 +332,40 @@ WaterfallHistory.prototype.updateBufferMarker = function() {
         return;
     }
 
-    var topIdx  = this.live? this.frames.length - 1 : this.cursor;
-    var limitT  = this.frames[topIdx].t - iq_buffer_seconds * 1000;
+    var topT     = this.frames[this.frames.length - 1].t;
+    var limitT   = topT - iq_buffer_seconds * 1000;
     var limitIdx = this.indexAt(limitT);
-    var height  = canvas_container.clientHeight;
-    var offset  = topIdx - limitIdx;
+    var height   = canvas_container.clientHeight;
+    var offset   = (this.frames.length - 1) - limitIdx;
 
     if (limitT < this.frames[0].t || offset <= 0 || offset >= height) {
         $marker.hide();
     } else {
-        var seconds = Math.round((this.frames[topIdx].t - this.frames[limitIdx].t) / 1000);
-        $marker.find('span').text('buffer end +' + seconds + 's');
+        var seconds = Math.round((topT - this.frames[limitIdx].t) / 1000);
+        $marker.find('span').text('buffer at ' + seconds + 's');
+        $marker.css('top', offset + 'px').show();
+    }
+};
+
+// Mark on the (always live) waterfall exactly where the playhead (the
+// current replay position) is, so it is clear at a glance "you are here",
+// without moving or redrawing the waterfall itself.
+WaterfallHistory.prototype.updatePlayheadMarker = function() {
+    var $marker = $('#openwebrx-replay-position-marker');
+    if (this.live || this.frames.length < 2 ||
+        typeof canvas_container === 'undefined' || !canvas_container) {
+        $marker.hide();
+        return;
+    }
+
+    var offset = (this.frames.length - 1) - this.cursor;
+    var height = canvas_container.clientHeight;
+
+    if (offset < 0 || offset >= height) {
+        $marker.hide();
+    } else {
+        var seconds = Math.round((this.frames[this.frames.length - 1].t - this.frames[this.cursor].t) / 1000);
+        $marker.find('span').text('playhead at ' + seconds + 's');
         $marker.css('top', offset + 'px').show();
     }
 };
@@ -386,11 +374,11 @@ WaterfallHistory.prototype.updateUi = function() {
     this.lastUi = Date.now();
 
     this.updateBufferMarker();
+    this.updatePlayheadMarker();
 
-    var $overlay  = $('#openwebrx-history-overlay');
-    var $label    = $('#openwebrx-history-label');
-    var $position = $('#openwebrx-replay-position-marker');
-    var $button   = $('.openwebrx-history-button');
+    var $overlay = $('#openwebrx-history-overlay');
+    var $label   = $('#openwebrx-history-label');
+    var $button  = $('.openwebrx-history-button');
     var n = this.frames.length;
 
     // Play/pause shows what pressing it does, and is lit while paused.
@@ -407,7 +395,6 @@ WaterfallHistory.prototype.updateUi = function() {
 
     if (this.live || !n) {
         $overlay.hide();
-        $position.hide();
         $label.show().text('LIVE ' + this.formatDelta(this.getDuration()).substring(1));
         return;
     }
@@ -417,12 +404,8 @@ WaterfallHistory.prototype.updateUi = function() {
     var text = this.formatDelta(delta);
     if (this.speed != 0) text += ' ' + (this.speed > 0? '▶' : '◀') + Math.abs(this.speed) + 'x';
 
-    // Mark where the currently displayed (topmost) line sits, labelled with
-    // how far behind live it is, so it is clear at a glance where "here" is
-    $position.find('span').text('playback +' + Math.round(delta) + 's');
-    $position.show();
-
-    // The red banner on the waterfall already shows this, no need to repeat it
+    // The red banner and the playhead marker on the waterfall already show
+    // this, no need to repeat it here too
     $label.hide();
     // Explain why the server does not replay the whole spectrum
     var reason = !this.canReplayOnServer()? 'IQ time-shift buffer is off on the server'
@@ -432,6 +415,6 @@ WaterfallHistory.prototype.updateUi = function() {
         : this.serverReplay === 'pending'? 'loading audio'
         : (this.localMismatch? 'no recorded audio at this frequency'
             : 'replaying audio of tuned frequency only') + (reason? ' (' + reason + ')' : '');
-    $overlay.find('.openwebrx-history-overlay-text').text('REPLAY ' + text + ' \u00b7 ' + audio);
+    $overlay.find('.openwebrx-history-overlay-text').text('REPLAY ' + text + ' · ' + audio);
     $overlay.show();
 };

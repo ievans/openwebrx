@@ -4,28 +4,37 @@ const load = require('./load');
 
 const FFT = 8;
 
-// Minimal chainable jQuery stand-in for the UI updates
-function $() {
-    const o = {};
-    for (const m of ['toggleClass', 'hide', 'show', 'val', 'text', 'html', 'find', 'each', 'attr', 'css']) o[m] = () => o;
-    o.is = () => false;
-    return o;
-}
-
 function setup() {
     const clock = { now: 0 };
     const timeouts = [];   // pending setTimeout() callbacks
     const sent = [];       // messages sent to the server
     const drawn = [];      // waterfall lines drawn, as their first value
     const played = [];     // audio chunks sent to the speakers, as their first sample
+    const marks = {};      // last known state of watched DOM elements, keyed by selector
+
+    // Minimal chainable jQuery stand-in for the UI updates. Elements the
+    // tests care about (the playhead and IQ buffer markers) get their
+    // show/hide/css/text calls recorded into `marks` so tests can assert
+    // on them without a real DOM.
+    function $(selector) {
+        const o = {};
+        for (const m of ['toggleClass', 'val', 'html', 'each', 'attr']) o[m] = () => o;
+        o.is = () => false;
+        o.find = () => o;
+        const mark = () => marks[selector] || (marks[selector] = {});
+        o.show = () => { mark().visible = true; return o; };
+        o.hide = () => { mark().visible = false; return o; };
+        o.css = (k, v) => { if (v !== undefined) mark()[k] = v; return o; };
+        o.text = (v) => { if (v !== undefined) mark().text = v; return o; };
+        return o;
+    }
+
     const ctx = load(['lib/AudioEngine.js', 'lib/WaterfallHistory.js'], {
         Date: class extends Date { static now() { return clock.now; } },
-        $, Utils: { HHMMSS: () => '00:00:00' },
-        waterfall_setup_done: 1, fft_size: FFT, center_freq: 145000000, bandwidth: 800,
-        canvas_container: null,
-        waterfall_add: d => drawn.push(d[0]), waterfall_clear: () => { drawn.length = 0; },
+        $, fft_size: FFT, center_freq: 145000000, bandwidth: 800,
+        canvas_container: { clientHeight: 600 },
+        waterfall_add: d => drawn.push(d[0]),
         spectrum: { update: () => {} },
-        requestAnimationFrame: f => f(),
         setInterval: () => 1, clearInterval: () => {},
         // Timeouts only run when the test says so
         setTimeout: f => { timeouts.push(f); return timeouts.length; }, clearTimeout: () => {},
@@ -42,17 +51,17 @@ function setup() {
     ctx.audioEngine = audio;
     const h = new ctx.WaterfallHistory();
     // One FFT line and one audio chunk every 100ms, both tagged with a sequence
-    // number (in dB and in sample value) so that we can tell which ones are shown
+    // number (in dB and in sample value) so that we can tell which ones are shown.
+    // The waterfall always shows live data now, so every line gets drawn.
     let seq = 0;
     const receive = () => {
         ++seq;
-        const live = h.push(new Float32Array(FFT).fill(-seq));
-        if (live) drawn.push(-seq);
+        h.push(new Float32Array(FFT).fill(-seq));
+        drawn.push(-seq);
         audio.pushAudio(new Int16Array([seq, seq]).buffer);
-        return live;
     };
     // Receive live data for 100ms
-    const step = () => { clock.now += 100; return receive(); };
+    const step = () => { clock.now += 100; receive(); };
     const run = (n) => { for (let i = 0; i < n; i++) step(); };
     // Advance the clock in 20ms steps like a browser would: live data
     // keeps arriving every 100ms, playback ticks run every 40ms
@@ -64,7 +73,7 @@ function setup() {
         }
     };
     const runTimeouts = () => { while (timeouts.length) timeouts.shift()(); };
-    return { h, audio, drawn, played, run, step, play, ctx, sent, runTimeouts, receive };
+    return { h, audio, drawn, played, marks, run, step, play, ctx, sent, runTimeouts, receive };
 }
 
 test('live: lines are drawn and audio is played', () => {
@@ -75,16 +84,15 @@ test('live: lines are drawn and audio is played', () => {
     assert.deepStrictEqual(s.played, [1, 2, 3, 4, 5]);
 });
 
-test('pause freezes waterfall and silences audio, pressing it again stays paused', () => {
+test('pause silences audio, but the waterfall keeps showing live data', () => {
     const s = setup();
     s.run(5);
     s.h.pause();
     s.played.length = 0;
-    const before = s.drawn.slice();
-    assert.strictEqual(s.step(), false, 'live data must not be shown while paused');
+    s.drawn.length = 0;
     s.run(5);
     assert.ok(!s.h.isLive());
-    assert.deepStrictEqual(s.drawn, before, 'waterfall must not change while paused');
+    assert.deepStrictEqual(s.drawn, [-6, -7, -8, -9, -10], 'the waterfall never freezes, only audio does');
     assert.deepStrictEqual(s.played, [], 'no audio while paused');
     s.h.pause();
     assert.ok(!s.h.isLive(), 'pausing again must not return to live');
@@ -98,17 +106,17 @@ test('LIVE returns to live, with live audio', () => {
     s.h.goLive();
     assert.ok(s.h.isLive());
     assert.strictEqual(s.drawn[s.drawn.length - 1], -10, 'shows newest line');
+    assert.strictEqual(s.marks['#openwebrx-replay-position-marker'].visible, false, 'playhead hides once live');
     s.played.length = 0;
     s.run(2);
     assert.deepStrictEqual(s.played, [11, 12]);
 });
 
-test('replay at 1x plays the recorded audio in step with the waterfall, not live audio', () => {
+test('replay at 1x plays the recorded audio in step with the playhead, not live audio', () => {
     const s = setup();
     s.run(100);            // 10 seconds of history
     s.h.skip(-5);          // back to line 50
     assert.ok(!s.h.isLive());
-    s.drawn.length = 0;
     s.played.length = 0;
     s.h.setSpeed(1);
     s.play(2000);          // 2 seconds of playback, live data keeps coming in
@@ -119,9 +127,10 @@ test('replay at 1x plays the recorded audio in step with the waterfall, not live
     assert.ok(Math.abs(s.played.length - 20) <= 1, 'played ' + s.played.length + ' chunks in 2s, expected 20');
     // audio chunks are consecutive, without gaps or repeats
     s.played.forEach((v, i) => i && assert.strictEqual(v, s.played[i - 1] + 1));
-    // and match the waterfall lines drawn meanwhile
-    const lastLine = -s.drawn[s.drawn.length - 1];
-    assert.ok(Math.abs(s.played[s.played.length - 1] - lastLine) <= 1, 'audio at ' + s.played[s.played.length - 1] + ', waterfall at ' + lastLine);
+    // and match where the playhead (cursor) ended up
+    const playheadLine = s.h.cursor + 1;
+    assert.ok(Math.abs(s.played[s.played.length - 1] - playheadLine) <= 1,
+        'audio at ' + s.played[s.played.length - 1] + ', playhead at line ' + playheadLine);
 });
 
 test('no audio when paused, rewinding or fast-forwarding', () => {
@@ -181,6 +190,17 @@ test('skip while paused stays paused', () => {
     assert.ok(!s.h.isLive());
 });
 
+test('skip updates the playhead marker immediately to the new position', () => {
+    const s = setup();
+    s.run(200);
+    s.h.skip(-10);
+    s.h.skip(5);
+    const m = s.marks['#openwebrx-replay-position-marker'];
+    const offset = (s.h.frames.length - 1) - s.h.cursor;
+    assert.ok(m.visible, 'playhead marker visible');
+    assert.strictEqual(m.top, offset + 'px', 'playhead marker at the new cursor row');
+});
+
 test('clicking the live waterfall jumps back to that moment and plays it', () => {
     const s = setup();
     s.run(100);            // 10 seconds of history, 100 lines
@@ -205,36 +225,56 @@ test('clicking below the buffered history is reported as out of range', () => {
     assert.ok(s.h.isLive(), 'nothing changes when out of range');
 });
 
-test('clicking while already replaying seeks relative to the current position', () => {
+test('clicking while already replaying seeks relative to now, since the waterfall stays live', () => {
     const s = setup();
     s.run(200);             // 20 seconds of history
     s.h.skip(-10);          // freezes and plays from 10s ago
     assert.ok(!s.h.isLive());
-    const before = s.h.cursor;
     assert.ok(s.h.clickSeek(30));
-    assert.strictEqual(s.h.cursor, before - 30, 'seeks relative to the current top, not to live');
+    assert.strictEqual(s.h.cursor, (s.h.frames.length - 1) - 30, 'seeks relative to now, not to the previous position');
     assert.strictEqual(s.h.speed, 1, 'keeps playing');
     assert.ok(!s.h.isLive());
 });
 
-test('skip while playing redraws immediately at the new position, not stale content', () => {
+test('clicking during playback updates the playhead marker immediately', () => {
     const s = setup();
     s.run(200);
     s.h.skip(-10);
-    s.drawn.length = 0;
-    s.h.skip(5);
-    assert.ok(s.drawn.length > 0, 'redraws immediately after the jump');
-    assert.strictEqual(s.drawn[s.drawn.length - 1], -(s.h.cursor + 1), 'newest line matches the jumped-to cursor');
+    assert.ok(s.h.clickSeek(20));
+    const m = s.marks['#openwebrx-replay-position-marker'];
+    const offset = (s.h.frames.length - 1) - s.h.cursor;
+    assert.ok(m.visible);
+    assert.strictEqual(m.top, offset + 'px');
 });
 
-test('clicking during playback redraws immediately, not stale content', () => {
+test('playhead marker shows the position, labelled in plain seconds, and hides once live', () => {
     const s = setup();
-    s.run(200);
-    s.h.skip(-10);
-    s.drawn.length = 0;
-    assert.ok(s.h.clickSeek(20));
-    assert.ok(s.drawn.length > 0, 'redraws immediately after the click');
-    assert.strictEqual(s.drawn[s.drawn.length - 1], -(s.h.cursor + 1), 'newest line matches the jumped-to cursor');
+    s.run(100);             // 10 seconds of history
+    s.h.skip(-5);           // 5 seconds back
+    let m = s.marks['#openwebrx-replay-position-marker'];
+    assert.ok(m.visible, 'playhead shown while replaying');
+    assert.strictEqual(m.text, 'playhead at 5s');
+    s.h.goLive();
+    m = s.marks['#openwebrx-replay-position-marker'];
+    assert.strictEqual(m.visible, false, 'playhead hides once live');
+});
+
+test('IQ buffer marker shows where server replay runs out, labelled in plain seconds', () => {
+    const s = setup();
+    s.ctx.iq_buffer_seconds = 6;
+    s.run(100);              // 10 seconds of history
+    const m = s.marks['#openwebrx-iq-buffer-marker'];
+    assert.ok(m.visible, 'buffer marker shown once there is more history than the buffer');
+    assert.strictEqual(m.text, 'buffer at 6s');
+});
+
+test('IQ buffer marker stays hidden without a configured buffer, or once it exceeds the history', () => {
+    const s = setup();
+    s.run(10);               // 1 second of history, no iq_buffer_seconds configured
+    assert.strictEqual(s.marks['#openwebrx-iq-buffer-marker'], undefined, 'never shown without a buffer configured');
+    s.ctx.iq_buffer_seconds = 30;   // longer than the recorded history
+    s.h.updateBufferMarker();
+    assert.strictEqual(s.marks['#openwebrx-iq-buffer-marker'].visible, false, 'hidden once the buffer exceeds recorded history');
 });
 
 test('fast-forward catches up and returns to live audio', () => {
