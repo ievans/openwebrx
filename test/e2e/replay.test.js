@@ -135,9 +135,39 @@ test('the IQ buffer limit is marked on the waterfall once there is enough histor
     const marker = await page.evaluate(() => ({
         visible: $('#openwebrx-iq-buffer-marker').is(':visible'),
         top: parseFloat($('#openwebrx-iq-buffer-marker').css('top')) || 0,
+        label: $('#openwebrx-iq-buffer-marker span').text(),
     }));
     assert.ok(marker.visible, 'buffer marker shows once there is more history than the IQ buffer');
     assert.ok(marker.top > 0, 'marker is placed below the top of the waterfall: ' + JSON.stringify(marker));
+    assert.match(marker.label, /buffer end \+\d+s/, 'marker is labelled: ' + JSON.stringify(marker));
+    await page.close();
+});
+
+test('clicking further down while already replaying also seeks, and labels the new position', async () => {
+    const page = await h.openReceiver(browser);
+    await page.evaluate(f => { UI.setModulation('nfm'); UI.setFrequency(f, false); }, h.CARRIER);
+    await page.waitForTimeout(15000);
+    await page.evaluate(() => wfHistory.skip(-3));
+    await page.click('.openwebrx-history-button');   // paused after seeking: play
+    await page.waitForFunction(() => wfHistory.serverReplay === 'active', null, { timeout: 5000 });
+    const before = await page.evaluate(() => wfHistory.playT);
+
+    // Well below the dead zone: retunes AND seeks further back
+    await clickWaterfall(page, h.BURST, 40);
+
+    const after = await page.evaluate(() => wfHistory.playT);
+    assert.ok(after < before - 2000, 'clicking further down also rewinds: before=' + before + ' after=' + after);
+    assert.ok(!(await h.historyState(page)).live, 'still replaying');
+    const tuned = await page.evaluate(() => UI.getFrequency());
+    assert.ok(Math.abs(tuned - h.BURST) < 3000, 'also tunes to the clicked frequency: ' + tuned);
+    const position = await page.evaluate(() => ({
+        visible: $('#openwebrx-replay-position-marker').is(':visible'),
+        label: $('#openwebrx-replay-position-marker span').text(),
+    }));
+    assert.match(position.label, /playback \+\d+s/, 'position marker is labelled: ' + JSON.stringify(position));
+
+    await page.click('.openwebrx-live-button');
+    assert.deepStrictEqual(page.errors, []);
     await page.close();
 });
 
@@ -152,8 +182,9 @@ test('while replaying, tune anywhere and hear that frequency as it was then', as
     await page.click('.openwebrx-history-button');   // paused after seeking: play
     await page.waitForFunction(() => wfHistory.serverReplay === 'active', null, { timeout: 5000 });
     assert.match((await h.historyState(page)).badge, /tune anywhere/);
-    // Now tune to the burst by clicking it on the waterfall
-    await clickWaterfall(page, h.BURST);
+    // Now tune to the burst by clicking it on the waterfall, right at the
+    // top (dead zone) so this only retunes and does not also seek
+    await clickWaterfall(page, h.BURST, 2);
     const tuned = await page.evaluate(() => UI.getFrequency());
     assert.ok(Math.abs(tuned - h.BURST) < 3000, 'tuned to ' + tuned);
     const age = await page.evaluate(() => Date.now() - wfHistory.playT);
@@ -196,8 +227,9 @@ test('beyond the IQ buffer, playback falls back to the recorded audio of the tun
     assert.ok(r.past >= 90, 'follows the recorded burst only ' + Math.round(r.past) + '%');
     assert.ok(r.live <= 60, 'follows the live burst ' + Math.round(r.live) + '%');
 
-    // Tuning elsewhere: nothing was recorded there, so nothing must play
-    await clickWaterfall(page, h.CARRIER);
+    // Tuning elsewhere (dead zone: only retune, do not also seek):
+    // nothing was recorded there, so nothing must play
+    await clickWaterfall(page, h.CARRIER, 2);
     await page.waitForTimeout(500);
     const other = await h.audioOutput(page, 2000);
     assert.ok(other.buffers === 0 || other.rms === 0, 'played audio from another frequency: ' + JSON.stringify(other));

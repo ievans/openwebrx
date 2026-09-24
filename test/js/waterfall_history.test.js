@@ -205,6 +205,38 @@ test('clicking below the buffered history is reported as out of range', () => {
     assert.ok(s.h.isLive(), 'nothing changes when out of range');
 });
 
+test('clicking while already replaying seeks relative to the current position', () => {
+    const s = setup();
+    s.run(200);             // 20 seconds of history
+    s.h.skip(-10);          // freezes and plays from 10s ago
+    assert.ok(!s.h.isLive());
+    const before = s.h.cursor;
+    assert.ok(s.h.clickSeek(30));
+    assert.strictEqual(s.h.cursor, before - 30, 'seeks relative to the current top, not to live');
+    assert.strictEqual(s.h.speed, 1, 'keeps playing');
+    assert.ok(!s.h.isLive());
+});
+
+test('skip while playing redraws immediately at the new position, not stale content', () => {
+    const s = setup();
+    s.run(200);
+    s.h.skip(-10);
+    s.drawn.length = 0;
+    s.h.skip(5);
+    assert.ok(s.drawn.length > 0, 'redraws immediately after the jump');
+    assert.strictEqual(s.drawn[s.drawn.length - 1], -(s.h.cursor + 1), 'newest line matches the jumped-to cursor');
+});
+
+test('clicking during playback redraws immediately, not stale content', () => {
+    const s = setup();
+    s.run(200);
+    s.h.skip(-10);
+    s.drawn.length = 0;
+    assert.ok(s.h.clickSeek(20));
+    assert.ok(s.drawn.length > 0, 'redraws immediately after the click');
+    assert.strictEqual(s.drawn[s.drawn.length - 1], -(s.h.cursor + 1), 'newest line matches the jumped-to cursor');
+});
+
 test('fast-forward catches up and returns to live audio', () => {
     const s = setup();
     s.run(50);

@@ -187,14 +187,14 @@ MemoryProgressBar = function(el) {
 MemoryProgressBar.prototype = new ProgressBar();
 
 MemoryProgressBar.prototype.getDefaultText = function() {
-    return 'System memory';
+    return 'Server Memory';
 };
 
 MemoryProgressBar.prototype.setMemory = function(memory) {
     var used = memory.total? memory.used / memory.total : 0;
     var gb = function(b) { return Math.round(b / 1073741824); };
     this.set(used,
-        'System memory [' + Math.round(100 * used) + '% ' + gb(memory.used) + '/' + gb(memory.total) + 'GB]',
+        'Server Memory [' + Math.round(100 * used) + '% ' + gb(memory.used) + '/' + gb(memory.total) + 'GB]',
         used > .85
     );
 };

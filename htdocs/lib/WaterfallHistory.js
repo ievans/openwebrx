@@ -162,6 +162,7 @@ WaterfallHistory.prototype.skip = function(seconds) {
         this.goLive();
     } else if (wasMoving) {
         this.setSpeed(speed);
+        this.requestRedraw();
     } else {
         this.syncAudio(true);
         this.requestRedraw();
@@ -169,20 +170,23 @@ WaterfallHistory.prototype.skip = function(seconds) {
     }
 };
 
-// Click on the live waterfall to jump straight to that moment in time and
-// start playing right away, instead of having to pause and skip back.
-// relativeY is measured in pixels down from the top of the visible
-// waterfall, where 0 is "now" and each row further down is one frame
-// further into the past. Returns FALSE if that time is no longer buffered.
+// Click anywhere on the waterfall (live or already replaying) to jump
+// straight to that moment in time and start playing right away, instead
+// of having to pause and skip back. relativeY is measured in pixels down
+// from the top of the *currently displayed* waterfall, where 0 is the
+// newest visible line and each row further down is one frame further
+// into the past. Returns FALSE if that time is no longer buffered.
 WaterfallHistory.prototype.clickSeek = function(relativeY) {
     // A click right at the top is just tuning, not a time jump
     if (relativeY < 5) return true;
     if (this.frames.length < 2) return false;
-    var idx = this.frames.length - 1 - Math.round(relativeY);
+    var topIdx = this.live? this.frames.length - 1 : this.cursor;
+    var idx = topIdx - Math.round(relativeY);
     if (idx < 0) return false;
     if (!this.freeze()) return false;
     this.cursor = idx;
     this.setSpeed(1);
+    this.requestRedraw();
     return true;
 };
 
@@ -365,12 +369,15 @@ WaterfallHistory.prototype.updateBufferMarker = function() {
 
     var topIdx  = this.live? this.frames.length - 1 : this.cursor;
     var limitT  = this.frames[topIdx].t - iq_buffer_seconds * 1000;
+    var limitIdx = this.indexAt(limitT);
     var height  = canvas_container.clientHeight;
-    var offset  = topIdx - this.indexAt(limitT);
+    var offset  = topIdx - limitIdx;
 
     if (limitT < this.frames[0].t || offset <= 0 || offset >= height) {
         $marker.hide();
     } else {
+        var seconds = Math.round((this.frames[topIdx].t - this.frames[limitIdx].t) / 1000);
+        $marker.find('span').text('buffer end +' + seconds + 's');
         $marker.css('top', offset + 'px').show();
     }
 };
@@ -380,9 +387,10 @@ WaterfallHistory.prototype.updateUi = function() {
 
     this.updateBufferMarker();
 
-    var $overlay = $('#openwebrx-history-overlay');
-    var $label   = $('#openwebrx-history-label');
-    var $button  = $('.openwebrx-history-button');
+    var $overlay  = $('#openwebrx-history-overlay');
+    var $label    = $('#openwebrx-history-label');
+    var $position = $('#openwebrx-replay-position-marker');
+    var $button   = $('.openwebrx-history-button');
     var n = this.frames.length;
 
     // Play/pause shows what pressing it does, and is lit while paused.
@@ -399,16 +407,23 @@ WaterfallHistory.prototype.updateUi = function() {
 
     if (this.live || !n) {
         $overlay.hide();
-        $label.text('LIVE ' + this.formatDelta(this.getDuration()).substring(1));
+        $position.hide();
+        $label.show().text('LIVE ' + this.formatDelta(this.getDuration()).substring(1));
         return;
     }
 
     var f = this.frames[this.cursor];
     var delta = (this.frames[n - 1].t - f.t) / 1000;
-    var text = this.formatDelta(delta) + ' (' + Utils.HHMMSS(f.t) + ' UTC)';
+    var text = this.formatDelta(delta);
     if (this.speed != 0) text += ' ' + (this.speed > 0? '▶' : '◀') + Math.abs(this.speed) + 'x';
 
-    $label.text(text);
+    // Mark where the currently displayed (topmost) line sits, labelled with
+    // how far behind live it is, so it is clear at a glance where "here" is
+    $position.find('span').text('playback +' + Math.round(delta) + 's');
+    $position.show();
+
+    // The red banner on the waterfall already shows this, no need to repeat it
+    $label.hide();
     // Explain why the server does not replay the whole spectrum
     var reason = !this.canReplayOnServer()? 'IQ time-shift buffer is off on the server'
         : this.replayError || '';
