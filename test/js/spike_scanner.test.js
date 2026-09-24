@@ -52,6 +52,18 @@ test('ignores constant carriers and short impulses', () => {
     assert.strictEqual(s.scanner.log.length, 0);
 });
 
+test('ignores a constant narrow carrier whose level jitters from frame to frame', () => {
+    // ADPCM FFT compression (the default) cannot follow the steep edges of a
+    // narrow carrier, so its decoded peak is often a few dB low and sometimes
+    // 20+ dB low (measured with the e2e fake SDR: median 4.5 dB below the
+    // highest value, 10% of frames more than 16 dB below)
+    const s = setup();
+    const jitter = rng(7);
+    for (let t = 0; t < 600; t++) s.frame(t, [{ bin: 1000, w: 1, p: -60 - 24 * jitter() ** 2 }]);
+    assert.deepStrictEqual(s.tuned, []);
+    assert.strictEqual(s.scanner.log.length, 0);
+});
+
 test('tunes to a new signal within a few frames', () => {
     const s = setup();
     for (let t = 0; t < 120; t++) s.frame(t, t >= 100 ? [birdie, { bin: 2000, w: 3, p: -85 }] : [birdie]);

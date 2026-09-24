@@ -14,7 +14,7 @@ test('spike scanner tunes to the new signal and logs it', async () => {
     await page.waitForFunction(f => Math.abs(UI.getFrequency() - f) < 2000, h.BURST, { timeout: 20000 });
     const log = await page.evaluate(() => spikeScanner.log.map(e => e.freq));
     assert.ok(log.some(f => Math.abs(f - h.BURST) < 2000), 'burst logged: ' + log);
-    assert.ok(!log.some(f => Math.abs(f - h.CARRIER) < 2000), 'steady carrier must not be logged');
+    assert.ok(!log.some(f => Math.abs(f - h.CARRIER) < 2000), 'steady carrier must not be logged: ' + log);
     // Activity log shows it and clicking the frequency tunes there in log-only mode
     await page.waitForSelector('.openwebrx-spike-log-row .spike-freq');
     await page.click('.openwebrx-spike-log-row >> nth=0 >> .spike-freq');

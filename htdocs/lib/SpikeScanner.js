@@ -13,6 +13,7 @@ function SpikeScanner() {
     this.snr       = 12;    // dB above noise floor to count as a signal
     this.novelty   = 8;     // dB above per-bin baseline to count as "new"
     this.persist   = 3;     // consecutive frames a spike must be present
+    this.holdN     = 3;     // frames each bin's level is the maximum over
     this.hang      = 2000;  // msec to stay on a signal after it disappears
     this.minDwell  = 1500;  // msec to stay on a signal before preempting it
     this.preempt   = 6;     // dB a new spike must beat current one by
@@ -33,6 +34,7 @@ SpikeScanner.prototype.reset = function() {
     this.closeActive();
     this.baseline = null;
     this.hits     = null;
+    this.recent   = [];
     this.frames   = 0;
     this.current  = null;
     this.cf       = center_freq;
@@ -181,18 +183,36 @@ SpikeScanner.prototype.isLockedOut = function(f) {
     return this.lockouts.some(function(l) { return f >= l[0] && f <= l[1]; });
 };
 
-SpikeScanner.prototype.update = function(data) {
+// Maximum of each bin over the last holdN frames. ADPCM FFT compression
+// (the default) cannot follow the steep edges of narrow signals, so their
+// decoded peaks vary by 20+ dB between frames; the maximum is steady.
+SpikeScanner.prototype.hold = function(data) {
+    this.recent.push(Float32Array.from(data));
+    if (this.recent.length > this.holdN) this.recent.shift();
+    var level = Float32Array.from(data);
+    for (var i = 0; i < this.recent.length - 1; ++i) {
+        var r = this.recent[i];
+        for (var j = 0; j < level.length; ++j) if (r[j] > level[j]) level[j] = r[j];
+    }
+    return level;
+};
+
+SpikeScanner.prototype.update = function(raw) {
     if (!this.running) return;
 
-    var len = data.length;
+    var len = raw.length;
     var j;
 
     // Relearn everything if the spectrum has moved or changed shape
     if (!this.baseline || this.baseline.length != len || this.cf != center_freq || this.bw != bandwidth) {
         this.reset();
-        this.baseline = Float32Array.from(data);
+        this.baseline = Float32Array.from(raw);
         this.hits = new Uint8Array(len);
     }
+
+    var data = this.hold(raw);
+    // Holding stretches a one-frame impulse over holdN frames
+    var persist = this.persist + this.holdN - 1;
 
     // Only scan the visible part of the waterfall, minus filter edges
     var range = get_visible_freq_range();
@@ -224,10 +244,10 @@ SpikeScanner.prototype.update = function(data) {
     // Find all persistent new spikes
     var spikes = [];
     for (j = start; j < end; ++j) {
-        if (this.hits[j] < this.persist) continue;
+        if (this.hits[j] < persist) continue;
         // Group adjacent bins into one spike
         var k = j, top = j, sum = 0, wsum = 0;
-        while (k < end && this.hits[k] >= this.persist) {
+        while (k < end && this.hits[k] >= persist) {
             if (data[k] > data[top]) top = k;
             var p = Math.pow(10, (data[k] - floor) / 10);
             sum += p; wsum += p * k;
