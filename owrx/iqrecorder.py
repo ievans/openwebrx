@@ -112,9 +112,10 @@ class IqRecorder(SdrSourceEventClient):
             self.reader = self.sdrSource.getBuffer().getReader()
             self.running = True
             self.sdrSource.addClient(self)
+            # Not props.filter(), which would stay wired after cancel()
             self.subs = [
-                props.filter("center_freq").wire(self._onCenterFreqChange),
-                props.filter("samp_rate").wire(self._onSampleRateChange),
+                props.wire(self._onCenterFreqChange),
+                props.wire(self._onSampleRateChange),
             ]
             self.thread = threading.Thread(target=self._run, name="iq-recorder")
             self.thread.start()

@@ -65,7 +65,10 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
     def start(self):
         props = self.sdrSource.getProps()
         self.sampleRate = props["samp_rate"]
-        self.subs = [props.filter("samp_rate").wire(self._onSampleRateChange)]
+        # Wire to the properties directly: a props.filter() stays wired to
+        # the SDR properties even after its subscription is cancelled, so
+        # it would leak on every SDR switch
+        self.subs = [props.wire(self._onSampleRateChange)]
         # This will call onStateChange() with the current state
         self.sdrSource.addClient(self)
 
