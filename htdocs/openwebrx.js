@@ -1211,14 +1211,12 @@ function on_ws_recv(evt) {
                     waterfall_f32 = new Float32Array(waterfall_i16.length - COMPRESS_FFT_PAD_N);
                     for (i = 0; i < waterfall_i16.length; i++) waterfall_f32[i] = waterfall_i16[i + COMPRESS_FFT_PAD_N] / 100;
                 }
-                // Record data into waterfall history, only display it
-                // if we are not currently replaying history
-                if (wfHistory.push(waterfall_f32)) {
-                    // Feed waterfall display with data
-                    waterfall_add(waterfall_f32);
-                    // Feed spectrum display with data
-                    spectrum.update(waterfall_f32);
-                }
+                // Record data for replay (playhead, audio, buffer marker),
+                // but the waterfall and spectrum always show live data; a
+                // playhead line marks the replay position instead
+                wfHistory.push(waterfall_f32);
+                waterfall_add(waterfall_f32);
+                spectrum.update(waterfall_f32);
                 // Feed scanners with live data
                 scanner.update(waterfall_f32);
                 spikeScanner.update(waterfall_f32);
@@ -1459,7 +1457,10 @@ function waterfall_clear() {
 function openwebrx_resize() {
     resize_canvases();
     resize_scale();
-    if (wfHistory) wfHistory.updateBufferMarker();
+    if (wfHistory) {
+        wfHistory.updateBufferMarker();
+        wfHistory.updatePlayheadMarker();
+    }
 }
 
 function initProgressBars() {

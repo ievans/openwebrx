@@ -10,6 +10,10 @@ after(async () => { await browser.close(); });
 const silent = a => a.buffers === 0 || a.rms === 0;
 const audible = a => a.buffers > 0 && a.rms > 0.001;
 
+// The waterfall never freezes any more: it always shows live data, and a
+// moving "playhead" line marks the replay position on top of it instead.
+const playheadVisible = page => page.evaluate(() => $('#openwebrx-replay-position-marker').is(':visible'));
+
 test('play/pause, LIVE, keys and playback control waterfall and audio', async () => {
     const page = await h.openReceiver(browser);
     await page.waitForTimeout(4000);    // build up some history
@@ -18,6 +22,7 @@ test('play/pause, LIVE, keys and playback control waterfall and audio', async ()
     assert.ok(s.live && s.liveLit && !s.pauseLit && !s.playIcon && !s.badge, 'starts live, showing pause: ' + JSON.stringify(s));
     assert.ok(audible(await h.audioOutput(page)), 'live audio plays');
     assert.ok(await h.waterfallMoving(page), 'live waterfall moves');
+    assert.ok(!(await playheadVisible(page)), 'no playhead while live');
 
     // -10s/+10s must not get stuck paused if it was playing beforehand
     await page.click('text=-10s');
@@ -30,7 +35,8 @@ test('play/pause, LIVE, keys and playback control waterfall and audio', async ()
     s = await h.historyState(page);
     assert.ok(!s.live && s.speed === 0 && s.pauseLit && s.playIcon && !s.liveLit, 'pauses, now showing play: ' + JSON.stringify(s));
     assert.match(s.badge, /REPLAY .* audio paused/);
-    assert.ok(!(await h.waterfallMoving(page)), 'paused waterfall is frozen');
+    assert.ok(await h.waterfallMoving(page), 'the waterfall itself keeps moving, only audio pauses');
+    assert.ok(await playheadVisible(page), 'playhead marker appears once paused');
     assert.ok(silent(await h.audioOutput(page)), 'no audio while paused');
 
     await page.click('text=-10s');
@@ -47,7 +53,8 @@ test('play/pause, LIVE, keys and playback control waterfall and audio', async ()
     await page.click('.openwebrx-history-button');
     s = await h.historyState(page);
     assert.ok(!s.live && s.speed === 0 && s.playIcon, 'pausing playback stays in history: ' + JSON.stringify(s));
-    assert.ok(!(await h.waterfallMoving(page)), 'frozen after pausing playback');
+    assert.ok(await h.waterfallMoving(page), 'the waterfall keeps moving, only audio pauses');
+    assert.ok(await playheadVisible(page), 'playhead marker still shown while paused');
     assert.ok(silent(await h.audioOutput(page)), 'no audio after pausing playback');
 
     await page.click('.openwebrx-live-button');
@@ -55,6 +62,7 @@ test('play/pause, LIVE, keys and playback control waterfall and audio', async ()
     assert.ok(s.live && s.liveLit && !s.badge, 'LIVE button returns to live: ' + JSON.stringify(s));
     assert.ok(audible(await h.audioOutput(page)), 'live audio after LIVE');
     assert.ok(await h.waterfallMoving(page), 'waterfall moves after LIVE');
+    assert.ok(!(await playheadVisible(page)), 'playhead hides once live');
 
     await page.keyboard.press('w');
     s = await h.historyState(page);
@@ -121,6 +129,7 @@ test('clicking the live waterfall rewinds to that moment and plays it', async ()
     const s = await h.historyState(page);
     assert.ok(!s.live && s.speed === 1, 'click rewinds and plays: ' + JSON.stringify(s));
     assert.ok(await h.waterfallMoving(page), 'waterfall keeps moving after the click');
+    assert.ok(await playheadVisible(page), 'playhead marker appears after the click');
     const tuned = await page.evaluate(() => UI.getFrequency());
     assert.ok(Math.abs(tuned - h.CARRIER) < 3000, 'also tunes to the clicked frequency: ' + tuned);
 
@@ -139,11 +148,11 @@ test('the IQ buffer limit is marked on the waterfall once there is enough histor
     }));
     assert.ok(marker.visible, 'buffer marker shows once there is more history than the IQ buffer');
     assert.ok(marker.top > 0, 'marker is placed below the top of the waterfall: ' + JSON.stringify(marker));
-    assert.match(marker.label, /buffer end \+\d+s/, 'marker is labelled: ' + JSON.stringify(marker));
+    assert.match(marker.label, /buffer at \d+s/, 'marker is labelled: ' + JSON.stringify(marker));
     await page.close();
 });
 
-test('clicking further down while already replaying also seeks, and labels the new position', async () => {
+test('clicking further down while already replaying also seeks, relative to now', async () => {
     const page = await h.openReceiver(browser);
     await page.evaluate(f => { UI.setModulation('nfm'); UI.setFrequency(f, false); }, h.CARRIER);
     await page.waitForTimeout(15000);
@@ -152,11 +161,12 @@ test('clicking further down while already replaying also seeks, and labels the n
     await page.waitForFunction(() => wfHistory.serverReplay === 'active', null, { timeout: 5000 });
     const before = await page.evaluate(() => wfHistory.playT);
 
-    // Well below the dead zone: retunes AND seeks further back
-    await clickWaterfall(page, h.BURST, 40);
+    // Well below the dead zone: retunes AND seeks, relative to live "now",
+    // not to the previous (3s back) position - so this jumps much further
+    await clickWaterfall(page, h.BURST, 80);
 
     const after = await page.evaluate(() => wfHistory.playT);
-    assert.ok(after < before - 2000, 'clicking further down also rewinds: before=' + before + ' after=' + after);
+    assert.ok(after < before - 3000, 'clicking further down also rewinds: before=' + before + ' after=' + after);
     assert.ok(!(await h.historyState(page)).live, 'still replaying');
     const tuned = await page.evaluate(() => UI.getFrequency());
     assert.ok(Math.abs(tuned - h.BURST) < 3000, 'also tunes to the clicked frequency: ' + tuned);
@@ -164,7 +174,7 @@ test('clicking further down while already replaying also seeks, and labels the n
         visible: $('#openwebrx-replay-position-marker').is(':visible'),
         label: $('#openwebrx-replay-position-marker span').text(),
     }));
-    assert.match(position.label, /playback \+\d+s/, 'position marker is labelled: ' + JSON.stringify(position));
+    assert.match(position.label, /playhead at \d+s/, 'position marker is labelled: ' + JSON.stringify(position));
 
     await page.click('.openwebrx-live-button');
     assert.deepStrictEqual(page.errors, []);
