@@ -200,6 +200,7 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         self.write_modes(modes)
 
         self.configSubs.append(SdrService.getActiveSources().wire(self._onSdrDeviceChanges))
+        self.configSubs.append(Config.get().filter("iq_buffer_seconds").wire(lambda *args: self.startIqBuffer()))
         self.configSubs.append(SdrService.getAvailableProfiles().wire(self._sendProfiles))
         self._sendProfiles()
 
@@ -428,7 +429,6 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         if self.closed:
             return
         pm = Config.get()
-        # iq_buffer_seconds only comes from settings.json, read at boot
         if self.sdr is not None and pm["iq_buffer_seconds"] > 0:
             try:
                 self.iqBuffer = IqTimeShiftBuffer.acquire(self.sdr)

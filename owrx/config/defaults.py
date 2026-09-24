@@ -359,8 +359,6 @@ defaultConfig = PropertyLayer(
     magic_key="memagic",
     allow_center_freq_changes=False,
     allow_audio_recording=True,
-    # Seconds of raw IQ kept in RAM so users can rewind and listen anywhere in
-    # the past (0 disables it). Admin only: set in settings.json, read at boot.
     iq_buffer_seconds=60,
     allow_chat=True,
     tuning_precision=2,

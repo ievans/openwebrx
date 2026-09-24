@@ -133,6 +133,16 @@ class GeneralSettingsController(SettingsFormController):
                     "allow_audio_recording",
                     "Allow users to record received audio",
                 ),
+                NumberInput(
+                    "iq_buffer_seconds",
+                    "IQ time-shift buffer",
+                    append="seconds",
+                    infotext="Keep this many seconds of raw IQ data in memory. Users can then rewind the "
+                    + "waterfall and listen anywhere in the spectrum in the past. Default is 60 seconds, "
+                    + "set to 0 to disable. "
+                    + "Uses 8 bytes per sample of RAM, i.e. about 19MB per second at 2.4MS/s.",
+                    validator=RangeValidator(0, 600),
+                ),
                 CheckboxInput(
                     "allow_center_freq_changes",
                     "Allow users to change center frequency",
