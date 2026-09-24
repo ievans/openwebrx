@@ -42,7 +42,7 @@ class ClientRegistry(object):
 
     def broadcast(self):
         n = self.clientCount()
-        for c in self.clients:
+        for c in self.clients.copy():
             c.write_clients(n)
 
     def addClient(self, client):
@@ -145,7 +145,7 @@ class ClientRegistry(object):
                 self.chatCount = self.chatCount + 1
 
         # Broadcast message to all clients
-        for c in self.clients:
+        for c in self.clients.copy():
             c.write_chat_message(name, text, color)
 
         # Report message
@@ -153,12 +153,12 @@ class ClientRegistry(object):
 
     # Relay external chat message to all connected clients.
     def relayChatMessage(self, name: str, text: str):
-        for c in self.clients:
+        for c in self.clients.copy():
             c.write_chat_message(name, text, "#ccc")
 
     # Broadcast administrative message to all connected clients.
     def broadcastAdminMessage(self, text: str):
-        for c in self.clients:
+        for c in self.clients.copy():
             c.write_log_message(text)
 
     # Get client IP address from the handler.

@@ -482,6 +482,8 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
                 self.sdr.activateProfile(profile)
 
     def setSdr(self, id=None):
+        if self.closed:
+            return
         next = None
         if id is not None:
             next = SdrService.getSource(id)
@@ -508,19 +510,29 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
             return
 
         self.sdr.addClient(self)
+        # close() may have run on another thread while we were registering
+        if self.closed:
+            self.sdr.removeClient(self)
+            return
         self.startIqBuffer()
 
     def resetSdr(self):
-        if self.sdr is not None:
+        if self.sdr is not None and not self.closed:
             self.stopDsp()
             self.stack.removeLayerByPriority(0)
             self.sdr.removeClient(self)
             self.sdr.addClient(self)
 
     def handleSdrAvailable(self):
-        self.getDsp().setProperties(self.connectionProperties)
+        dsp = self.getDsp()
+        if dsp is None:
+            return
+        dsp.setProperties(self.connectionProperties)
         self.stack.replaceLayer(0, self.sdr.getProps())
-        self.sdr.addSpectrumClient(self)
+        sdr = self.sdr
+        sdr.addSpectrumClient(self)
+        if self.closed:
+            sdr.removeSpectrumClient(self)
 
     def handleNoSdrsAvailable(self):
         self.write_sdr_error("No SDR Devices available")
@@ -551,7 +563,7 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
 
     def getDsp(self):
         with self.dspLock:
-            if self.dsp is None and self.sdr is not None:
+            if self.dsp is None and self.sdr is not None and not self.closed:
                 self.dsp = DspManager(self, self.sdr)
                 self.dsp.setProperties(self.connectionProperties)
         return self.dsp
