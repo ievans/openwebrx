@@ -2385,7 +2385,7 @@ img.openwebrx-mirror-img
 /* Marks the playhead: where in the live waterfall the current replay
    position is, moving up/down as playback and seeking move it */
 #openwebrx-replay-position-marker {
-    border-top: 2px solid rgba(0, 224, 192, 0.9);
+    border-top: 1px dashed rgba(0, 224, 192, 0.9);
 }
 
 #openwebrx-replay-position-marker span {
