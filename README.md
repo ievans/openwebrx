@@ -72,9 +72,10 @@ The Docker images read the following variables at startup:
   served at all, and `OPENWEBRX_ADMIN_USER` / `OPENWEBRX_ADMIN_PASSWORD` do not need to be set.
   Note that this does not cover `/status.json` and `/metrics`, which are public either way.
   Defaults to `true`.
-- `OPENWEBRX_ADMIN_USER` and `OPENWEBRX_ADMIN_PASSWORD` - username and password of the admin
-  account to create on first startup. Both have to be set, and are ignored when the admin
-  interface is disabled.
+- `OPENWEBRX_ADMIN_USER` and `OPENWEBRX_ADMIN_PASSWORD` - username and password of an admin
+  account to create on first startup. Both are optional; if neither is set, no account is
+  created automatically. If set, both must be provided together, and they are ignored when
+  the admin interface is disabled.
 
 ## Community
 
