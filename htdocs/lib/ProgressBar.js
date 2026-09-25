@@ -221,7 +221,8 @@ IqBufferProgressBar.prototype.setStatus = function(status) {
     );
     this.$el.attr('title', 'Playback buffer: ' + Math.round(status.seconds) + ' of ' + Math.round(max) +
         ' seconds at ' + (status.samp_rate / 1e6) + 'MS/s, ' + mb(status.bytes) + ' of ' + mb(status.max_bytes) +
-        ' system memory. Within this time you can tune anywhere while replaying.');
+        ' system memory' + (status.memory_limited? ' (shortened to fit the server\'s memory limit)' : '') +
+        '. Within this time you can tune anywhere while replaying.');
 };
 
 ProgressBar.types = {

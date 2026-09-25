@@ -20,7 +20,7 @@ class FakeDsp(object):
 
 class IqReplayTest(TestCase):
     def setUp(self):
-        config = {"iq_buffer_seconds": 60}
+        config = {"iq_buffer_seconds": 60, "iq_buffer_memory_percent": 100}
         p = patch("owrx.iqbuffer.Config.get", lambda: config)
         p.start()
         self.addCleanup(p.stop)
@@ -116,7 +116,7 @@ class IqReplayTest(TestCase):
 
 class TimeShiftBufferLookupTest(TestCase):
     def setUp(self):
-        config = {"iq_buffer_seconds": 60}
+        config = {"iq_buffer_seconds": 60, "iq_buffer_memory_percent": 100}
         p = patch("owrx.iqbuffer.Config.get", lambda: config)
         p.start()
         self.addCleanup(p.stop)

@@ -1,5 +1,6 @@
 from owrx.source import SdrSourceEventClient, SdrSourceState, SdrClientClass
 from owrx.config import Config
+from owrx.cpu import CpuUsageThread
 from collections import deque
 from datetime import datetime, timezone
 
@@ -17,11 +18,20 @@ logger = logging.getLogger(__name__)
 # past (see IqReplay). One buffer is shared by all users of an SDR source. The buffer never keeps an SDR running by itself, it
 # only listens while the SDR is running for other reasons.
 #
+# Each buffer keeps iq_buffer_seconds of data, but all buffers together
+# never use more than iq_buffer_memory_percent of the server's memory.
+#
 class IqTimeShiftBuffer(SdrSourceEventClient):
     sharedBuffers = {}
     sharedLock = threading.Lock()
+    # Buffers currently started, which share the memory limit
+    activeBuffers = []
     # Complex float32 samples
     BYTES_PER_SAMPLE = 8
+    # How often to look up the server's total memory again
+    MEMORY_CHECK_INTERVAL = 10.0
+    memoryTotal = None
+    memoryChecked = None
 
     # Acquire shared buffer for the given SDR source
     @staticmethod
@@ -34,6 +44,9 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
             buf.users += 1
             if buf.users == 1:
                 buf.start()
+                IqTimeShiftBuffer.activeBuffers.append(buf)
+                # The others now have less memory to share
+                IqTimeShiftBuffer._trimAll()
             return buf
 
     # Release shared buffer, stopping it when nobody uses it anymore
@@ -42,6 +55,8 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
         with IqTimeShiftBuffer.sharedLock:
             buf.users -= 1
             if buf.users <= 0:
+                if buf in IqTimeShiftBuffer.activeBuffers:
+                    IqTimeShiftBuffer.activeBuffers.remove(buf)
                 buf.stop()
                 if IqTimeShiftBuffer.sharedBuffers.get(buf.sdrSource.getId()) is buf:
                     del IqTimeShiftBuffer.sharedBuffers[buf.sdrSource.getId()]
@@ -91,8 +106,67 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
             self.chunks.clear()
             self.size = 0
 
-    def getMaxBytes(self):
+    # Bytes needed to hold iq_buffer_seconds at the current sample rate
+    def getWantedBytes(self):
         return int(Config.get()["iq_buffer_seconds"] * self.sampleRate * IqTimeShiftBuffer.BYTES_PER_SAMPLE)
+
+    # Size limit of this buffer: iq_buffer_seconds, unless that does not
+    # fit into its share of the memory limit
+    def getMaxBytes(self):
+        wanted = self.getWantedBytes()
+        limit = IqTimeShiftBuffer.getMemoryLimit()
+        if limit is None:
+            return wanted
+        return min(wanted, self._getMemoryShare(limit))
+
+    # This buffer's share of LIMIT bytes among all active buffers. A buffer
+    # that needs less than an equal share leaves the rest to the others.
+    def _getMemoryShare(self, limit):
+        mine = self.getWantedBytes()
+        wants = sorted([b.getWantedBytes() for b in list(IqTimeShiftBuffer.activeBuffers) if b is not self] + [mine])
+        remaining = limit
+        for i, wanted in enumerate(wants):
+            share = remaining // (len(wants) - i)
+            if wanted >= share:
+                # Neither this nor any bigger buffer fits: all get the same
+                return share
+            if wanted == mine:
+                return mine
+            remaining -= wanted
+        return mine
+
+    # Bytes all buffers together may use, or None if unlimited
+    @staticmethod
+    def getMemoryLimit():
+        total = IqTimeShiftBuffer._getMemoryTotal()
+        if not total:
+            return None
+        return int(total * Config.get()["iq_buffer_memory_percent"] / 100)
+
+    # Total server memory in bytes (the container limit, if there is one),
+    # or None if unknown. Cached, since it is needed for every chunk.
+    @staticmethod
+    def _getMemoryTotal():
+        now = time.monotonic()
+        checked = IqTimeShiftBuffer.memoryChecked
+        if checked is None or now - checked > IqTimeShiftBuffer.MEMORY_CHECK_INTERVAL:
+            memory = CpuUsageThread.get_memory()
+            IqTimeShiftBuffer.memoryTotal = memory["total"] if memory else None
+            IqTimeShiftBuffer.memoryChecked = now
+        return IqTimeShiftBuffer.memoryTotal
+
+    # Drop the oldest data of all active buffers that are over their limit
+    @staticmethod
+    def _trimAll():
+        for buf in list(IqTimeShiftBuffer.activeBuffers):
+            maxBytes = buf.getMaxBytes()
+            with buf.lock:
+                buf._trim(maxBytes)
+
+    # Must be called with self.lock held
+    def _trim(self, maxBytes):
+        while self.chunks and self.size > maxBytes:
+            self.size -= len(self.chunks.popleft()[2])
 
     # Fill level, for display: buffered and maximum seconds and bytes
     def getStatus(self):
@@ -106,6 +180,8 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
             "max_seconds": maxBytes / perSecond if perSecond else 0,
             "bytes": size,
             "max_bytes": maxBytes,
+            # Holds fewer than iq_buffer_seconds because of the memory limit
+            "memory_limited": maxBytes < self.getWantedBytes(),
             "samp_rate": rate,
         }
 
@@ -152,8 +228,7 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
                 self.chunks.append((datetime.now(timezone.utc), cf, data, time.monotonic(), self.seq))
                 self.seq += 1
                 self.size += len(data)
-                while self.chunks and self.size > maxBytes:
-                    self.size -= len(self.chunks.popleft()[2])
+                self._trim(maxBytes)
 
     # Find the chunk holding the samples received the given number of
     # seconds ago. Returns its sequence number, or None if not buffered.

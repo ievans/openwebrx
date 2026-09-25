@@ -7,20 +7,25 @@ from test.iq.fakes import FakeSource, samples
 
 class IqTimeShiftBufferTest(TestCase):
     def setUp(self):
-        config = {"iq_buffer_seconds": 2}
-        p = patch("owrx.iqbuffer.Config.get", lambda: config)
+        self.config = {"iq_buffer_seconds": 2, "iq_buffer_memory_percent": 100}
+        p = patch("owrx.iqbuffer.Config.get", lambda: self.config)
+        p.start()
+        self.addCleanup(p.stop)
+        # Plenty of memory, unless a test says otherwise
+        self.memoryTotal = 1 << 30
+        p = patch("owrx.iqbuffer.IqTimeShiftBuffer._getMemoryTotal", lambda: self.memoryTotal)
         p.start()
         self.addCleanup(p.stop)
         # 4 samples per second, so 2 seconds = 8 samples = 64 bytes
         self.source = FakeSource(samp_rate=4, state=SdrSourceState.RUNNING)
 
-    def acquire(self):
-        buf = IqTimeShiftBuffer.acquire(self.source)
+    def acquire(self, source=None):
+        buf = IqTimeShiftBuffer.acquire(source or self.source)
         self.addCleanup(lambda: IqTimeShiftBuffer.release(buf) if buf.users > 0 else None)
         return buf
 
     def feed(self, buf, *chunks):
-        reader = self.source.reader
+        reader = buf.sdrSource.reader
         for c in chunks:
             # The chunk is fully processed once the buffer asks for the next one
             done = reader.reads + 1
@@ -84,6 +89,70 @@ class IqTimeShiftBufferTest(TestCase):
         # A chunk that a reader which is no longer current still returns
         buf._run(_OneShotReader(samples(1, 1)))
         self.assertEqual(buf.size, 0)
+
+
+    def testMemoryLimitShortensBuffer(self):
+        # 32 of 100 bytes: room for 1 of the 2 configured seconds
+        self.memoryTotal = 100
+        self.config["iq_buffer_memory_percent"] = 32
+        buf = self.acquire()
+        self.feed(buf, *[samples(v, v, v, v) for v in range(5)])
+        self.assertEqual(buf.size, 32)
+        status = buf.getStatus()
+        self.assertEqual(status["max_seconds"], 1.0)
+        self.assertTrue(status["memory_limited"])
+
+    def testSecondsLimitWhenMemoryAllows(self):
+        # 50 of 1000 bytes is more than the 64 bytes 2 seconds need
+        self.memoryTotal = 1000
+        self.config["iq_buffer_memory_percent"] = 50
+        buf = self.acquire()
+        self.feed(buf, *[samples(v, v, v, v) for v in range(5)])
+        self.assertEqual(buf.size, 64)
+        self.assertFalse(buf.getStatus()["memory_limited"])
+
+    def testUnknownMemoryMeansNoLimit(self):
+        self.memoryTotal = None
+        self.config["iq_buffer_memory_percent"] = 1
+        buf = self.acquire()
+        self.assertEqual(buf.getMaxBytes(), 64)
+
+    def testSdrsShareTheMemoryLimit(self):
+        # 96 bytes for all: one buffer alone gets its full 64
+        # Chunks of 16 bytes, so that sizes are not rounded to chunks
+        self.memoryTotal = 96
+        a = self.acquire()
+        self.feed(a, *[samples(v, v) for v in range(5)])
+        self.assertEqual(a.size, 64)
+        # A second SDR at the same rate: 48 each, and the first one
+        # shrinks right away, without waiting for more data
+        other = FakeSource(samp_rate=4, state=SdrSourceState.RUNNING, id="other")
+        b = self.acquire(other)
+        self.assertEqual(a.getMaxBytes(), 48)
+        self.assertEqual(b.getMaxBytes(), 48)
+        self.assertEqual(a.size, 48)
+        self.feed(b, *[samples(v, v) for v in range(5)])
+        self.assertEqual(b.size, 48)
+        # Once the second SDR is gone, the first one may grow again
+        IqTimeShiftBuffer.release(b)
+        self.assertEqual(a.getMaxBytes(), 64)
+
+    def testSmallBufferLeavesRestOfMemoryToOthers(self):
+        # 2 seconds at 2 samples/s need 32 bytes, leaving 64 of 96 bytes,
+        # which is all that the 4 samples/s buffer needs
+        self.memoryTotal = 96
+        a = self.acquire()
+        b = self.acquire(FakeSource(samp_rate=2, state=SdrSourceState.RUNNING, id="slow"))
+        self.assertEqual(b.getMaxBytes(), 32)
+        self.assertEqual(a.getMaxBytes(), 64)
+        # With 80 bytes, the small one still fits, the big one gets the rest
+        self.memoryTotal = 80
+        self.assertEqual(b.getMaxBytes(), 32)
+        self.assertEqual(a.getMaxBytes(), 48)
+        # With 40, neither fits: equal shares
+        self.memoryTotal = 40
+        self.assertEqual(a.getMaxBytes(), 20)
+        self.assertEqual(b.getMaxBytes(), 20)
 
 
 class _OneShotReader(object):

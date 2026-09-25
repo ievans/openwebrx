@@ -143,6 +143,15 @@ class GeneralSettingsController(SettingsFormController):
                     + "Uses 8 bytes per sample of RAM, i.e. about 19MB per second at 2.4MS/s.",
                     validator=RangeValidator(0, 600),
                 ),
+                NumberInput(
+                    "iq_buffer_memory_percent",
+                    "IQ time-shift buffer memory limit",
+                    append="%",
+                    infotext="The IQ time-shift buffers of all SDRs together never use more than this share of "
+                    + "the server's memory (of the container's memory limit, if there is one). Buffers hold fewer "
+                    + "seconds than configured above when they would not fit. Default is 50%.",
+                    validator=RangeValidator(1, 95),
+                ),
                 CheckboxInput(
                     "allow_center_freq_changes",
                     "Allow users to change center frequency",

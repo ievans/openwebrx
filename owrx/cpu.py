@@ -97,12 +97,15 @@ class CpuUsageThread(threading.Thread):
     # Memory in use and total, in bytes, or None if unknown. Prefers the
     # cgroup memory limit (i.e. what a container is actually confined to)
     # and falls back to whole-system memory when there is no such limit,
-    # e.g. on bare metal or in an unrestricted container.
-    def get_memory(self):
-        return self._get_memory_cgroup() or self._get_memory_proc()
+    # e.g. on bare metal or in an unrestricted container. Static, so that
+    # others (e.g. the IQ buffer's memory limit) can use it too.
+    @staticmethod
+    def get_memory():
+        return CpuUsageThread._get_memory_cgroup() or CpuUsageThread._get_memory_proc()
 
     # System memory in use and total, in bytes, or None if unknown
-    def _get_memory_proc(self):
+    @staticmethod
+    def _get_memory_proc():
         try:
             info = {}
             with open("/proc/meminfo", "r") as f:
@@ -118,7 +121,8 @@ class CpuUsageThread(threading.Thread):
     # Total system memory in bytes, or None if unknown. Only used to tell an
     # actual cgroup memory limit apart from the "no limit" case, which is
     # reported as a sentinel far larger than any real amount of memory.
-    def _get_host_memory_total(self):
+    @staticmethod
+    def _get_host_memory_total():
         try:
             with open("/proc/meminfo", "r") as f:
                 for line in f:
@@ -132,8 +136,9 @@ class CpuUsageThread(threading.Thread):
     # Memory in use and the cgroup memory limit, in bytes, for the cgroup
     # this process is confined to. Returns None if there is no memory
     # controller, or it reports no limit (not actually memory-constrained).
-    def _get_memory_cgroup(self):
-        host_total = self._get_host_memory_total()
+    @staticmethod
+    def _get_memory_cgroup():
+        host_total = CpuUsageThread._get_host_memory_total()
 
         # cgroup v2 (unified hierarchy)
         try:
@@ -144,7 +149,7 @@ class CpuUsageThread(threading.Thread):
                 if host_total is None or total < host_total:
                     with open("/sys/fs/cgroup/memory.current", "r") as f:
                         usage = int(f.read().strip())
-                    inactive = self._read_cgroup_stat("/sys/fs/cgroup/memory.stat", "inactive_file")
+                    inactive = CpuUsageThread._read_cgroup_stat("/sys/fs/cgroup/memory.stat", "inactive_file")
                     return {"used": max(usage - inactive, 0), "total": total}
         except Exception:
             pass
@@ -156,7 +161,7 @@ class CpuUsageThread(threading.Thread):
             if host_total is None or total < host_total:
                 with open("/sys/fs/cgroup/memory/memory.usage_in_bytes", "r") as f:
                     usage = int(f.read().strip())
-                cache = self._read_cgroup_stat("/sys/fs/cgroup/memory/memory.stat", "total_inactive_file")
+                cache = CpuUsageThread._read_cgroup_stat("/sys/fs/cgroup/memory/memory.stat", "total_inactive_file")
                 return {"used": max(usage - cache, 0), "total": total}
         except Exception:
             pass
