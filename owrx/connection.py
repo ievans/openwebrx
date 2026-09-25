@@ -165,6 +165,11 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
         self.configSubs = []
         self.bookmarkSub = None
         self.iqBuffer = None
+        # Buffer is started and stopped from the websocket, the settings
+        # and the SDR's threads. Without this, one of them could overwrite
+        # or miss a buffer another one acquired, which then never gets
+        # released and keeps its IQ data forever.
+        self.iqLock = threading.Lock()
         self.iqReplay = None
         self.replayLock = threading.Lock()
         self.closed = False
@@ -431,18 +436,25 @@ class OpenWebRxReceiverClient(OpenWebRxClient, SdrSourceEventClient):
             self.startIqBuffer()
 
     def startIqBuffer(self):
-        self.stopIqBuffer()
-        if self.closed:
-            return
-        pm = Config.get()
-        if self.sdr is not None and pm["iq_buffer_seconds"] > 0:
-            try:
-                self.iqBuffer = IqTimeShiftBuffer.acquire(self.sdr)
-                IqBufferReporter.getSharedInstance().add(self.write_iq_buffer, self.iqBuffer)
-            except Exception:
-                logger.exception("Failed to start IQ time-shift buffer")
+        with self.iqLock:
+            self._stopIqBuffer()
+            # close() sets this before calling stopIqBuffer(), so either we
+            # see it here, or close() waits for us and releases the buffer
+            if self.closed:
+                return
+            pm = Config.get()
+            if self.sdr is not None and pm["iq_buffer_seconds"] > 0:
+                try:
+                    self.iqBuffer = IqTimeShiftBuffer.acquire(self.sdr)
+                    IqBufferReporter.getSharedInstance().add(self.write_iq_buffer, self.iqBuffer)
+                except Exception:
+                    logger.exception("Failed to start IQ time-shift buffer")
 
     def stopIqBuffer(self):
+        with self.iqLock:
+            self._stopIqBuffer()
+
+    def _stopIqBuffer(self):
         self.stopReplay()
         IqBufferReporter.getSharedInstance().remove(self.write_iq_buffer)
         if self.iqBuffer is not None:
