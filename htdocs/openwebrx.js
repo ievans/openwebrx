@@ -1140,7 +1140,14 @@ function on_ws_recv(evt) {
                         wfHistory.onReplayStatus(json['value']);
                         break;
                     case 'iq_buffer':
-                        $('#openwebrx-bar-iq-buffer').progressbar().setStatus(json['value']);
+                        var iqStatus = json['value'];
+                        $('#openwebrx-bar-iq-buffer').progressbar().setStatus(iqStatus);
+                        // The server's memory limit can make the buffer hold
+                        // fewer seconds than configured, so mark what it holds
+                        if (iq_buffer_seconds > 0 && iqStatus.max_seconds > 0 && iqStatus.max_seconds !== iq_buffer_seconds) {
+                            iq_buffer_seconds = iqStatus.max_seconds;
+                            wfHistory.updateBufferMarker();
+                        }
                         break;
                     case 'log_message':
                         divlog(json['value'], true);

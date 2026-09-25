@@ -176,10 +176,9 @@ BatteryProgressBar.prototype.setBattery = function(battery) {
     );
 };
 
-// System memory use, warns when it gets high (e.g. from IQ buffers). Read from
-// /proc/meminfo, so this reflects the host kernel's view of memory, not a
-// figure scoped to the OpenWebRX process (e.g. the whole host when running
-// in a container without its own memory cgroup limits).
+// Server memory use, warns when it gets high (e.g. from IQ buffers). The
+// server reports its cgroup's memory limit (container, systemd service)
+// when it has one, else the whole system's memory from /proc/meminfo.
 MemoryProgressBar = function(el) {
     ProgressBar.call(this, el);
 };
@@ -221,7 +220,8 @@ IqBufferProgressBar.prototype.setStatus = function(status) {
     );
     this.$el.attr('title', 'Playback buffer: ' + Math.round(status.seconds) + ' of ' + Math.round(max) +
         ' seconds at ' + (status.samp_rate / 1e6) + 'MS/s, ' + mb(status.bytes) + ' of ' + mb(status.max_bytes) +
-        ' system memory. Within this time you can tune anywhere while replaying.');
+        ' system memory' + (status.memory_limited? ' (shortened to fit the server\'s memory limit)' : '') +
+        '. Within this time you can tune anywhere while replaying.');
 };
 
 ProgressBar.types = {

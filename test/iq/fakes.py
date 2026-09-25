@@ -42,7 +42,8 @@ class FakeBuffer(object):
 
 class FakeSource(object):
     """Minimal SDR source with the interface used by the IQ classes."""
-    def __init__(self, samp_rate=4, center_freq=145000000, state=None):
+    def __init__(self, samp_rate=4, center_freq=145000000, state=None, id="fake"):
+        self.id = id
         self.props = PropertyLayer(samp_rate=samp_rate, center_freq=center_freq)
         self.reader = FakeReader()
         self.clients = []
@@ -52,7 +53,7 @@ class FakeSource(object):
         return True
 
     def getId(self):
-        return "fake"
+        return self.id
 
     def getProps(self):
         return self.props

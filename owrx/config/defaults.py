@@ -360,6 +360,7 @@ defaultConfig = PropertyLayer(
     allow_center_freq_changes=False,
     allow_audio_recording=True,
     iq_buffer_seconds=60,
+    iq_buffer_memory_percent=50,
     allow_chat=True,
     tuning_precision=2,
     squelch_auto_margin=10,
