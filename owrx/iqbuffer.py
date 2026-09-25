@@ -58,6 +58,10 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
         self.reader     = None
         self.thread     = None
         self.subs       = []
+        # Guards reader and stopped: SDR state events arrive on the SDR's
+        # own threads, concurrently with release() on a client's thread
+        self.readerLock = threading.Lock()
+        self.stopped    = False
 
     def start(self):
         props = self.sdrSource.getProps()
@@ -70,6 +74,12 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
         self.sdrSource.addClient(self)
 
     def stop(self):
+        # The SDR hands state events to a copy of its client list, so one
+        # may still reach us after removeClient(). Without this flag a late
+        # RUNNING would start a reader on this discarded buffer, which then
+        # fills up forever next to the buffer that replaced it.
+        with self.readerLock:
+            self.stopped = True
         while self.subs:
             self.subs.pop().cancel()
         self.sdrSource.removeClient(self)
@@ -112,14 +122,16 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
             self.sampleRate = changes["samp_rate"]
 
     def _startReader(self):
-        if self.reader is not None:
-            return
-        self.reader = self.sdrSource.getBuffer().getReader()
-        self.thread = threading.Thread(target=self._run, args=(self.reader,), name="iq-timeshift")
-        self.thread.start()
+        with self.readerLock:
+            if self.reader is not None or self.stopped:
+                return
+            self.reader = self.sdrSource.getBuffer().getReader()
+            self.thread = threading.Thread(target=self._run, args=(self.reader,), name="iq-timeshift")
+            self.thread.start()
 
     def _stopReader(self):
-        reader, self.reader = self.reader, None
+        with self.readerLock:
+            reader, self.reader = self.reader, None
         if reader is not None:
             reader.stop()
 
@@ -133,6 +145,10 @@ class IqTimeShiftBuffer(SdrSourceEventClient):
             cf = self.sdrSource.getProps()["center_freq"]
             maxBytes = self.getMaxBytes()
             with self.lock:
+                # A reader that has been stopped may still return one last
+                # chunk, which must not end up in a cleared buffer
+                if reader is not self.reader:
+                    break
                 self.chunks.append((datetime.now(timezone.utc), cf, data, time.monotonic(), self.seq))
                 self.seq += 1
                 self.size += len(data)

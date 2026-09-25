@@ -65,3 +65,31 @@ class IqTimeShiftBufferTest(TestCase):
             self.source.props["center_freq"] = 146000000
             IqTimeShiftBuffer.release(buf)
         self.assertEqual(len(self.source.props.subscribers), before)
+
+    def testLateRunningEventAfterReleaseDoesNotRestart(self):
+        # The SDR delivers state events to a copy of its client list, so
+        # RUNNING can arrive after the last user released the buffer (e.g.
+        # a user closing the page while the SDR starts up). That must not
+        # bring the discarded buffer back to life.
+        self.source.state = SdrSourceState.STARTING
+        buf = IqTimeShiftBuffer.acquire(self.source)
+        IqTimeShiftBuffer.release(buf)
+        buf.onStateChange(SdrSourceState.RUNNING)
+        self.assertIsNone(buf.reader)
+        self.assertIsNone(buf.thread)
+
+    def testStoppedReaderDoesNotStoreLateChunk(self):
+        buf = self.acquire()
+        buf._stopReader()
+        # A chunk that a reader which is no longer current still returns
+        buf._run(_OneShotReader(samples(1, 1)))
+        self.assertEqual(buf.size, 0)
+
+
+class _OneShotReader(object):
+    def __init__(self, data):
+        self.data = [data]
+
+    def read(self):
+        return self.data.pop() if self.data else None
+
