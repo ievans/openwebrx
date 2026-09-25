@@ -136,37 +136,93 @@ class CpuUsageThread(threading.Thread):
     # Memory in use and the cgroup memory limit, in bytes, for the cgroup
     # this process is confined to. Returns None if there is no memory
     # controller, or it reports no limit (not actually memory-constrained).
+    #
+    # The limit need not be set on the cgroup mount's root: a systemd
+    # service (MemoryMax=), a container sharing the host's cgroup namespace
+    # or a nested cgroup has it further down, and any ancestor's limit
+    # applies too. So check this process' own cgroup, as listed in
+    # /proc/self/cgroup, and all its ancestors, and take the tightest one.
     @staticmethod
     def _get_memory_cgroup():
         host_total = CpuUsageThread._get_host_memory_total()
+        v2Path, v1Path = CpuUsageThread._get_cgroup_paths()
 
         # cgroup v2 (unified hierarchy)
-        try:
-            with open("/sys/fs/cgroup/memory.max", "r") as f:
-                limit = f.read().strip()
-            if limit != "max":
-                total = int(limit)
-                if host_total is None or total < host_total:
-                    with open("/sys/fs/cgroup/memory.current", "r") as f:
-                        usage = int(f.read().strip())
-                    inactive = CpuUsageThread._read_cgroup_stat("/sys/fs/cgroup/memory.stat", "inactive_file")
-                    return {"used": max(usage - inactive, 0), "total": total}
-        except Exception:
-            pass
+        memory = CpuUsageThread._get_cgroup_limit(
+            CpuUsageThread._get_cgroup_dirs("/sys/fs/cgroup", v2Path),
+            "memory.max", "memory.current", "inactive_file", host_total
+        )
+        if memory is not None:
+            return memory
 
         # cgroup v1
+        return CpuUsageThread._get_cgroup_limit(
+            CpuUsageThread._get_cgroup_dirs("/sys/fs/cgroup/memory", v1Path),
+            "memory.limit_in_bytes", "memory.usage_in_bytes", "total_inactive_file", host_total
+        )
+
+    # This process' cgroup v2 path and cgroup v1 memory controller path,
+    # from /proc/self/cgroup. "/" (i.e. just the mount's root) if unknown.
+    @staticmethod
+    def _get_cgroup_paths():
+        v2Path = v1Path = "/"
         try:
-            with open("/sys/fs/cgroup/memory/memory.limit_in_bytes", "r") as f:
-                total = int(f.read().strip())
-            if host_total is None or total < host_total:
-                with open("/sys/fs/cgroup/memory/memory.usage_in_bytes", "r") as f:
-                    usage = int(f.read().strip())
-                cache = CpuUsageThread._read_cgroup_stat("/sys/fs/cgroup/memory/memory.stat", "total_inactive_file")
-                return {"used": max(usage - cache, 0), "total": total}
+            with open("/proc/self/cgroup", "r") as f:
+                for line in f:
+                    parts = line.strip().split(":", 2)
+                    if len(parts) != 3:
+                        continue
+                    if parts[0] == "0" and parts[1] == "":
+                        v2Path = parts[2]
+                    elif "memory" in parts[1].split(","):
+                        v1Path = parts[2]
         except Exception:
             pass
+        return v2Path, v1Path
 
-        return None
+    # Directory of the cgroup PATH below MOUNT and of all its ancestors up
+    # to MOUNT, innermost first. Inside a container with its own cgroup
+    # namespace, the path is "/" and just MOUNT is left. If the path is
+    # not visible below the mount, its directories simply do not exist.
+    @staticmethod
+    def _get_cgroup_dirs(mount, path):
+        parts = [p for p in path.strip().split("/") if p]
+        dirs = []
+        while True:
+            dirs.append("/".join([mount] + parts))
+            if not parts:
+                return dirs
+            parts.pop()
+
+    # Tightest memory limit set in any of DIRS, with the memory in use in
+    # that same cgroup, since that is what counts against the limit. A
+    # limit of "max" or beyond host memory means no limit.
+    @staticmethod
+    def _get_cgroup_limit(dirs, limitFile, usageFile, inactiveKey, host_total):
+        best = None
+        for d in dirs:
+            try:
+                with open(d + "/" + limitFile, "r") as f:
+                    limit = f.read().strip()
+                if limit == "max":
+                    continue
+                total = int(limit)
+            except Exception:
+                continue
+            if host_total is not None and total >= host_total:
+                continue
+            if best is None or total < best[0]:
+                best = (total, d)
+        if best is None:
+            return None
+        total, d = best
+        try:
+            with open(d + "/" + usageFile, "r") as f:
+                usage = int(f.read().strip())
+        except Exception:
+            return None
+        inactive = CpuUsageThread._read_cgroup_stat(d + "/memory.stat", inactiveKey)
+        return {"used": max(usage - inactive, 0), "total": total}
 
     # Reads a single "key value" stat out of a cgroup memory.stat file
     @staticmethod

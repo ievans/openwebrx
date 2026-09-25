@@ -5,6 +5,10 @@ from owrx.source import SdrSourceState, SdrClientClass
 from test.iq.fakes import FakeSource, samples
 
 
+# Before setUp() replaces it with a fixed amount of memory
+realGetMemoryTotal = IqTimeShiftBuffer.__dict__["_getMemoryTotal"]
+
+
 class IqTimeShiftBufferTest(TestCase):
     def setUp(self):
         self.config = {"iq_buffer_seconds": 2, "iq_buffer_memory_percent": 100}
@@ -153,6 +157,19 @@ class IqTimeShiftBufferTest(TestCase):
         self.memoryTotal = 40
         self.assertEqual(a.getMaxBytes(), 20)
         self.assertEqual(b.getMaxBytes(), 20)
+
+
+    def testMemoryLimitIsShareOfContainerMemory(self):
+        # Not the cached test value: the real lookup, which reports the
+        # container's cgroup limit where there is one
+        p = patch("owrx.iqbuffer.IqTimeShiftBuffer._getMemoryTotal", realGetMemoryTotal)
+        p.start()
+        self.addCleanup(p.stop)
+        IqTimeShiftBuffer.memoryChecked = None
+        self.addCleanup(setattr, IqTimeShiftBuffer, "memoryChecked", None)
+        self.config["iq_buffer_memory_percent"] = 25
+        with patch("owrx.iqbuffer.CpuUsageThread.get_memory", return_value={"used": 0, "total": 2000000000}):
+            self.assertEqual(IqTimeShiftBuffer.getMemoryLimit(), 500000000)
 
 
 class _OneShotReader(object):

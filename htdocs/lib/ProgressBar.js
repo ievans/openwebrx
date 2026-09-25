@@ -176,10 +176,9 @@ BatteryProgressBar.prototype.setBattery = function(battery) {
     );
 };
 
-// System memory use, warns when it gets high (e.g. from IQ buffers). Read from
-// /proc/meminfo, so this reflects the host kernel's view of memory, not a
-// figure scoped to the OpenWebRX process (e.g. the whole host when running
-// in a container without its own memory cgroup limits).
+// Server memory use, warns when it gets high (e.g. from IQ buffers). The
+// server reports its cgroup's memory limit (container, systemd service)
+// when it has one, else the whole system's memory from /proc/meminfo.
 MemoryProgressBar = function(el) {
     ProgressBar.call(this, el);
 };

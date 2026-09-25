@@ -79,3 +79,74 @@ class MemoryTest(TestCase):
         with patch("builtins.open", fake_files({})):
             memory = self.thread.get_memory()
         self.assertIsNone(memory)
+
+    MEMINFO = "MemTotal:       16000000 kB\nMemAvailable:   10000000 kB\n"
+    UNLIMITED_V1 = "9223372036854771712\n"
+
+    def test_cgroup_v1_limit_on_nested_cgroup(self):
+        # The process' own memory cgroup has the limit, the mount's root
+        # (e.g. the host's, or a parent sandbox's) has none
+        files = {
+            "/proc/meminfo": self.MEMINFO,
+            "/proc/self/cgroup": "5:cpu:/\n4:memory:/sandbox/job\n0::/\n",
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes": self.UNLIMITED_V1,
+            "/sys/fs/cgroup/memory/sandbox/memory.limit_in_bytes": self.UNLIMITED_V1,
+            "/sys/fs/cgroup/memory/sandbox/job/memory.limit_in_bytes": "2000000000\n",
+            "/sys/fs/cgroup/memory/sandbox/job/memory.usage_in_bytes": "1500000000\n",
+            "/sys/fs/cgroup/memory/sandbox/job/memory.stat": "total_inactive_file 500000000\n",
+        }
+        with patch("builtins.open", fake_files(files)):
+            memory = self.thread.get_memory()
+        self.assertEqual(memory, {"used": 1000000000, "total": 2000000000})
+
+    def test_cgroup_v2_limit_on_systemd_service(self):
+        # e.g. MemoryMax= on the openwebrx service, host cgroup namespace
+        files = {
+            "/proc/meminfo": self.MEMINFO,
+            "/proc/self/cgroup": "0::/system.slice/openwebrx.service\n",
+            "/sys/fs/cgroup/system.slice/openwebrx.service/memory.max": "3000000000\n",
+            "/sys/fs/cgroup/system.slice/openwebrx.service/memory.current": "1000000000\n",
+            "/sys/fs/cgroup/system.slice/memory.max": "max\n",
+        }
+        with patch("builtins.open", fake_files(files)):
+            memory = self.thread.get_memory()
+        self.assertEqual(memory, {"used": 1000000000, "total": 3000000000})
+
+    def test_cgroup_v2_tightest_ancestor_limit_wins(self):
+        # The slice allows less than the service itself: the slice's limit
+        # applies, and its usage is what counts against it
+        files = {
+            "/proc/meminfo": self.MEMINFO,
+            "/proc/self/cgroup": "0::/radio.slice/openwebrx.service\n",
+            "/sys/fs/cgroup/radio.slice/openwebrx.service/memory.max": "4000000000\n",
+            "/sys/fs/cgroup/radio.slice/openwebrx.service/memory.current": "1000000000\n",
+            "/sys/fs/cgroup/radio.slice/memory.max": "2000000000\n",
+            "/sys/fs/cgroup/radio.slice/memory.current": "1200000000\n",
+        }
+        with patch("builtins.open", fake_files(files)):
+            memory = self.thread.get_memory()
+        self.assertEqual(memory, {"used": 1200000000, "total": 2000000000})
+
+    def test_cgroup_path_not_visible_uses_mount_root(self):
+        # A container whose cgroup is mounted as the root, while
+        # /proc/self/cgroup still shows the host's path for it
+        files = {
+            "/proc/meminfo": self.MEMINFO,
+            "/proc/self/cgroup": "0::/docker/abc123\n",
+            "/sys/fs/cgroup/memory.max": "2000000000\n",
+            "/sys/fs/cgroup/memory.current": "500000000\n",
+        }
+        with patch("builtins.open", fake_files(files)):
+            memory = self.thread.get_memory()
+        self.assertEqual(memory, {"used": 500000000, "total": 2000000000})
+
+    def test_nested_cgroups_without_limit_fall_back_to_proc_meminfo(self):
+        files = {
+            "/proc/meminfo": self.MEMINFO,
+            "/proc/self/cgroup": "4:memory:/sandbox/job\n0::/\n",
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes": self.UNLIMITED_V1,
+            "/sys/fs/cgroup/memory/sandbox/job/memory.limit_in_bytes": self.UNLIMITED_V1,
+        }
+        with patch("builtins.open", fake_files(files)):
+            memory = self.thread.get_memory()
+        self.assertEqual(memory, {"used": 6000000 * 1024, "total": 16000000 * 1024})
