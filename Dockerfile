@@ -32,6 +32,12 @@ RUN apt-get update && \
 # would reinstall from scratch on every build. This layer only reruns when the list
 # itself changes; if debian/control adds a package we haven't added here, apt still
 # pulls it in via the final install below, just without the cache benefit.
+#
+# Depends are hard requirements: fail the build if one is missing. Recommends are
+# best-effort, same as apt's own handling of a package's Recommends field -- some
+# (e.g. dream-headless, perseus-tools) only have a candidate on certain architectures,
+# so we probe each with apt-cache first and skip the ones that aren't available here
+# instead of letting apt-get hard-fail on them.
 RUN apt-get update && \
     apt-get install -y \
       adduser \
@@ -39,7 +45,9 @@ RUN apt-get update && \
       python3-pkg-resources \
       python3-distutils-extra \
       owrx-connector \
-      python3-csdr \
+      python3-csdr && \
+    AVAILABLE_RECOMMENDS="" && \
+    for pkg in \
       python3-digiham \
       direwolf \
       wsjtx \
@@ -76,7 +84,11 @@ RUN apt-get update && \
       sonde-decoders \
       dxlaprs-lora \
       lame \
-      dream && \
+      dream; \
+    do \
+      apt-cache show "$pkg" >/dev/null 2>&1 && AVAILABLE_RECOMMENDS="$AVAILABLE_RECOMMENDS $pkg" || true; \
+    done && \
+    apt-get install -y $AVAILABLE_RECOMMENDS && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /build/openwebrx_*.deb /tmp/
