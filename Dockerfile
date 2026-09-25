@@ -35,9 +35,13 @@ RUN apt-get update && \
 #
 # Depends are hard requirements: fail the build if one is missing. Recommends are
 # best-effort, same as apt's own handling of a package's Recommends field -- some
-# (e.g. dream-headless, perseus-tools) only have a candidate on certain architectures,
-# so we probe each with apt-cache first and skip the ones that aren't available here
-# instead of letting apt-get hard-fail on them.
+# (e.g. dream-headless, perseus-tools) aren't actually installable on this
+# architecture, so we probe each with `apt-get install --dry-run` and skip the ones
+# that fail instead of letting the real install hard-fail on them. Neither `apt-cache
+# show` (matches a package's metadata regardless of whether it's installable) nor
+# `apt-cache policy` (reports a "Candidate" version without checking whether that
+# version's own dependencies resolve) catch a package whose Depends can't be
+# satisfied on this architecture; only actually asking the resolver does.
 RUN apt-get update && \
     apt-get install -y \
       adduser \
@@ -86,7 +90,8 @@ RUN apt-get update && \
       lame \
       dream; \
     do \
-      apt-cache show "$pkg" >/dev/null 2>&1 && AVAILABLE_RECOMMENDS="$AVAILABLE_RECOMMENDS $pkg" || true; \
+      apt-get install --dry-run -y "$pkg" >/dev/null 2>&1 && \
+        AVAILABLE_RECOMMENDS="$AVAILABLE_RECOMMENDS $pkg" || true; \
     done && \
     apt-get install -y $AVAILABLE_RECOMMENDS && \
     rm -rf /var/lib/apt/lists/*
