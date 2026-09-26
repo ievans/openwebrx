@@ -1,0 +1,67 @@
+name: Docker image smoke test
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .github/workflows/docker-test.yml
+  push:
+    branches: [master]
+    paths:
+      - Dockerfile
+      - .github/workflows/docker-test.yml
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: openwebrx-test:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Runs with the same hardening the README recommends: no capabilities,
+      # no privilege escalation, and a read-only root filesystem with only
+      # /tmp and the data volume writable.
+      - name: Run hardened container
+        run: |
+          docker run -d --name owrx-test \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges \
+            --read-only \
+            --tmpfs /tmp:mode=1777 \
+            -v owrx-data:/var/lib/openwebrx \
+            -p 8073:8073 \
+            openwebrx-test:latest
+
+      - name: Wait for the web UI
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8073/ >/dev/null; then
+              echo "OpenWebRX responded"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "OpenWebRX did not come up in time"
+          exit 1
+
+      - name: Verify it's actually running with no privileges
+        run: |
+          docker exec owrx-test id
+          docker exec owrx-test grep -E '^(Uid|CapEff)' /proc/1/status
+
+      - name: Container logs
+        if: always()
+        run: docker logs owrx-test
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f owrx-test

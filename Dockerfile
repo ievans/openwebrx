@@ -98,13 +98,22 @@ RUN apt-get update && \
 
 COPY --from=build /build/openwebrx_*.deb /tmp/
 
+# Pin the postinst-created "openwebrx" user to a fixed uid:gid so it's stable
+# across rebuilds, for anyone bind-mounting host dirs into the volumes below.
 RUN apt-get update && \
     apt-get install -y /tmp/openwebrx_*.deb && \
-    rm -rf /tmp/*.deb /var/lib/apt/lists/*
+    rm -rf /tmp/*.deb /var/lib/apt/lists/* && \
+    usermod -u 1000 openwebrx && \
+    groupmod -g 1000 openwebrx && \
+    chown -R openwebrx:openwebrx /var/lib/openwebrx
 
 VOLUME /etc/openwebrx
 VOLUME /var/lib/openwebrx
 
 EXPOSE 8073
+
+# Run as non-root so the image works with `docker run --cap-drop=ALL`.
+ENV HOME=/tmp
+USER openwebrx
 
 CMD ["openwebrx"]
