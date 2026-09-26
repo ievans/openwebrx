@@ -77,9 +77,18 @@ The Docker images read the following variables at startup:
   created automatically. If set, both must be provided together, and they are ignored when
   the admin interface is disabled.
 
-The image runs as the unprivileged `openwebrx` user (uid:gid `1000:1000`), so it works with
-`docker run --cap-drop=ALL`. If you bind-mount host directories over `/etc/openwebrx` or
-`/var/lib/openwebrx`, `chown -R 1000:1000` them first (named volumes need no action).
+The image runs as the unprivileged `openwebrx` user (uid:gid `1000:1000`) and needs no Linux
+capabilities or a writable root filesystem, so it also runs hardened:
+
+```
+docker run --cap-drop=ALL --security-opt=no-new-privileges \
+  --read-only --tmpfs /tmp:mode=1777 \
+  -v openwebrx-config:/etc/openwebrx -v openwebrx-data:/var/lib/openwebrx \
+  -p 8073:8073 <image>
+```
+
+If you bind-mount host directories over `/etc/openwebrx` or `/var/lib/openwebrx` instead of using
+named volumes, `chown -R 1000:1000` them first.
 
 ## Community
 
