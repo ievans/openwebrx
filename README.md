@@ -77,6 +77,13 @@ The Docker images read the following variables at startup:
   created automatically. If set, both must be provided together, and they are ignored when
   the admin interface is disabled.
 
+The image runs as the unprivileged `openwebrx` user (uid:gid `1000:1000`), not root, and needs
+no Linux capabilities, so it works fine with `docker run --cap-drop=ALL`. If you bind-mount host
+directories over `/etc/openwebrx` or `/var/lib/openwebrx`, make sure they are readable/writable
+by uid:gid `1000:1000` (e.g. `chown -R 1000:1000 ./config ./data`); named Docker volumes are set
+up automatically and need no action. Hardware access (RTL-SDR, Perseus, ...) still works via the
+`plugdev`/`perseususb` group membership the package sets up, together with `docker run --device`.
+
 ## Community
 
 If you have trouble setting up or configuring your receiver, you have some great idea you want to see implemented, or

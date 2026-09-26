@@ -98,13 +98,30 @@ RUN apt-get update && \
 
 COPY --from=build /build/openwebrx_*.deb /tmp/
 
+# openwebrx's postinst creates the "openwebrx" system user with a dynamically
+# allocated UID/GID (whatever the next free system id happens to be). Pin it to
+# a fixed value so it's predictable across rebuilds -- operators binding host
+# directories into the /etc/openwebrx and /var/lib/openwebrx volumes below need
+# a stable uid:gid to chown them to.
 RUN apt-get update && \
     apt-get install -y /tmp/openwebrx_*.deb && \
-    rm -rf /tmp/*.deb /var/lib/apt/lists/*
+    rm -rf /tmp/*.deb /var/lib/apt/lists/* && \
+    usermod -u 1000 openwebrx && \
+    groupmod -g 1000 openwebrx && \
+    chown -R openwebrx:openwebrx /var/lib/openwebrx
 
 VOLUME /etc/openwebrx
 VOLUME /var/lib/openwebrx
 
 EXPOSE 8073
+
+# Run as the unprivileged openwebrx user (uid:gid 1000:1000) instead of root, so
+# the container works with `docker run --cap-drop=ALL`: nothing here needs root
+# or any Linux capability, only read access to /etc/openwebrx and write access
+# to /var/lib/openwebrx and $HOME, all of which openwebrx already owns.
+# Hardware access (RTL-SDR, Perseus, ...) comes from the plugdev/perseususb
+# group membership set up by the package's postinst, not from capabilities.
+ENV HOME=/tmp
+USER openwebrx
 
 CMD ["openwebrx"]
