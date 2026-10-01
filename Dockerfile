@@ -102,6 +102,25 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends hackrf && \
     rm -rf /var/lib/apt/lists/*
 
+# Optional Claude Code CLI for debugging inside the container (off by default):
+#   docker build --build-arg INSTALL_CLAUDE=true .
+# Native binary from npm's per-platform package, pinned by sha256. To bump,
+# change the version and both hashes together (sha256sum of each .tgz).
+ARG INSTALL_CLAUDE=false
+RUN if [ "$INSTALL_CLAUDE" = "true" ]; then \
+      version=2.1.287 && \
+      case "$(dpkg --print-architecture)" in \
+        amd64) platform=linux-x64; sha256=348090e889baacf20e6665fd236e2bc617767eb733407151128efd0281a06111 ;; \
+        arm64) platform=linux-arm64; sha256=33ae16d93e1e82b9de10684b540650a9ffbb654eb317e4bfc1ff0f932816f1bc ;; \
+        *) echo "INSTALL_CLAUDE: no build for $(dpkg --print-architecture)" >&2; exit 1 ;; \
+      esac && \
+      curl -fsSL -o /tmp/claude.tgz \
+        "https://registry.npmjs.org/@anthropic-ai/claude-code-$platform/-/claude-code-$platform-$version.tgz" && \
+      echo "$sha256  /tmp/claude.tgz" | sha256sum -c - && \
+      tar -xzf /tmp/claude.tgz -C /usr/local/bin --strip-components=1 package/claude && \
+      rm /tmp/claude.tgz; \
+    fi
+
 COPY --from=build /build/openwebrx_*.deb /tmp/
 
 # Pin the postinst-created "openwebrx" user to a fixed uid:gid so it's stable
