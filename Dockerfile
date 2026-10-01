@@ -96,6 +96,12 @@ RUN apt-get update && \
     apt-get install -y $AVAILABLE_RECOMMENDS && \
     rm -rf /var/lib/apt/lists/*
 
+# hackrf_transfer, for raw IQ captures when debugging a decoder outside
+# OpenWebRX (stop openwebrx first -- it holds the device).
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends hackrf && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /build/openwebrx_*.deb /tmp/
 
 # Pin the postinst-created "openwebrx" user to a fixed uid:gid so it's stable
