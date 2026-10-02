@@ -329,12 +329,19 @@ class SdrSource(ABC):
             self._getTcpSource().setWriter(self.buffer)
         return self.buffer
 
+    def getTunerFrequency(self):
+        """
+        the frequency the hardware has to be programmed to. can be overridden by sources that need to compensate
+        for something in software (see HackrfSource).
+        """
+        freq = self.sdrProps["center_freq"]
+        if "lfo_offset" in self.sdrProps and self.sdrProps["lfo_offset"] is not None:
+            freq += self.sdrProps["lfo_offset"]
+        return freq
+
     def getCommandValues(self):
         dict = self.sdrProps.__dict__()
-        if "lfo_offset" in dict and dict["lfo_offset"] is not None:
-            dict["tuner_freq"] = dict["center_freq"] + dict["lfo_offset"]
-        else:
-            dict["tuner_freq"] = dict["center_freq"]
+        dict["tuner_freq"] = self.getTunerFrequency()
         return dict
 
     def start(self):
