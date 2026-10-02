@@ -37,6 +37,24 @@ RUN git clone https://github.com/luarvique/csdr.git csdr && \
     cd pycsdr && dpkg-buildpackage -us -uc -b
 
 
+# Build our fork of the SoapySDR HackRF module (replaces the distro/PPA one at runtime)
+FROM debian:bookworm-slim AS soapyhackrf-build
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates git build-essential cmake pkg-config \
+      libsoapysdr-dev libhackrf-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG SOAPYHACKRF_REF=763819f4c14c2ef76d00aca002e33fd09a013e30
+WORKDIR /build
+RUN git clone https://github.com/ievans/SoapyHackRF.git soapyhackrf && \
+    git -C soapyhackrf checkout "$SOAPYHACKRF_REF" && \
+    cmake -S soapyhackrf -B soapyhackrf/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr && \
+    cmake --build soapyhackrf/build -j"$(nproc)" && \
+    DESTDIR=/out cmake --install soapyhackrf/build
+
+
 # Runtime image: install the freshly built package, pulling its
 # dependencies (csdr, owrx-connector, digiham, ...) from the OpenWebRX+ repo
 FROM debian:bookworm-slim
@@ -122,6 +140,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /build/openwebrx_*.deb /tmp/
+COPY --from=soapyhackrf-build /out/ /
 COPY --from=csdr-build /build/libcsdr0_*.deb /build/python3-csdr_*.deb /tmp/csdr/
 
 # Pin the postinst-created "openwebrx" user to a fixed uid:gid so it's stable

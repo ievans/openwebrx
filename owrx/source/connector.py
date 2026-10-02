@@ -34,12 +34,6 @@ class ConnectorSource(SdrSource):
             )
         )
 
-    def getTunerFrequencyProperties(self):
-        """
-        properties that feed into getTunerFrequency(); a change to any of them is sent as a center_freq change.
-        """
-        return ["center_freq", "lfo_offset"]
-
     def sendControlMessage(self, changes):
         with self.controlLock:
             if self.controlSocket:
@@ -52,11 +46,13 @@ class ConnectorSource(SdrSource):
     def onPropertyChange(self, changes):
         if self.monitor is None:
             return
-        if any(k in changes for k in self.getTunerFrequencyProperties()):
-            changes["center_freq"] = self.getTunerFrequency()
-            for k in self.getTunerFrequencyProperties():
-                if k != "center_freq":
-                    changes.pop(k, None)
+        if (
+            ("center_freq" in changes or "lfo_offset" in changes)
+            and "lfo_offset" in self.sdrProps
+            and self.sdrProps["lfo_offset"] is not None
+        ):
+            changes["center_freq"] = self.sdrProps["center_freq"] + self.sdrProps["lfo_offset"]
+            changes.pop("lfo_offset", None)
         self.sendControlMessage(changes)
 
     def postStart(self):
