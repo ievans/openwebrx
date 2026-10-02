@@ -1,0 +1,88 @@
+name: Build image (reusable)
+
+# Reusable workflow that builds, pushes and attests the container image.
+#
+# It is deliberately a separate workflow: the signed SLSA provenance names
+# *this* workflow as the builder, and the caller (docker-publish.yml) has no
+# steps that run between the build and the signing, which is what GitHub's
+# artifact attestations need to meet SLSA Build L3. Do not add caches here:
+# L3 requires that one run cannot influence another.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write      # push to ghcr.io with GITHUB_TOKEN
+      id-token: write      # sign provenance with Sigstore (OIDC)
+      attestations: write  # store the attestation
+    env:
+      GHCR_IMAGE: ghcr.io/${{ github.repository }}
+      # Optional mirror: set secrets DOCKERHUB_USERNAME / DOCKERHUB_TOKEN and
+      # (optionally) the variable DOCKERHUB_REPOSITORY, e.g. "myuser/openwebrx".
+      DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_REPOSITORY || format('{0}/openwebrx', secrets.DOCKERHUB_USERNAME) }}
+      HAVE_DOCKERHUB: ${{ secrets.DOCKERHUB_TOKEN != '' && secrets.DOCKERHUB_USERNAME != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - if: env.HAVE_DOCKERHUB == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.GHCR_IMAGE }}
+            name=${{ env.DOCKERHUB_IMAGE }},enable=${{ env.HAVE_DOCKERHUB }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          sbom: true
+          provenance: mode=max
+
+      - name: Attest provenance (ghcr.io)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.GHCR_IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest provenance (Docker Hub)
+        if: env.HAVE_DOCKERHUB == 'true'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: index.docker.io/${{ env.DOCKERHUB_IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

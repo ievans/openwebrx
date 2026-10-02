@@ -90,6 +90,20 @@ docker run --cap-drop=ALL --security-opt=no-new-privileges \
 If you bind-mount host directories over `/etc/openwebrx` or `/var/lib/openwebrx` instead of using
 named volumes, `chown -R 1000:1000` them first.
 
+## Verifying images
+
+Images are built and pushed only by the [Publish Docker image](.github/workflows/docker-publish.yml)
+workflow on GitHub, after the test suite passes, and are published to
+`ghcr.io/ievans/openwebrx`. Each image carries signed
+[SLSA build provenance](https://slsa.dev/spec/v1.0/provenance) and an SBOM. To check that an image
+was built from this repository by that workflow:
+
+```
+gh attestation verify oci://ghcr.io/ievans/openwebrx:latest \
+  --repo ievans/openwebrx \
+  --signer-workflow ievans/openwebrx/.github/workflows/build-image.yml
+```
+
 ## Community
 
 If you have trouble setting up or configuring your receiver, you have some great idea you want to see implemented, or

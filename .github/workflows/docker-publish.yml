@@ -1,46 +1,33 @@
 name: Publish Docker image
 
+# The only way images are published. Nothing is pushed from a maintainer's
+# machine: registry credentials live in GitHub (GITHUB_TOKEN for ghcr.io,
+# repository secrets for the optional Docker Hub mirror), and every image
+# carries signed build provenance (see "Verifying images" in README.md).
+
 on:
   push:
     branches: [master]
+    tags: ["v*"]
   workflow_dispatch:
 
 concurrency:
-  group: docker-publish
-  cancel-in-progress: true
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
-  docker:
-    runs-on: ubuntu-latest
-    env:
-      # Override with a repository variable DOCKERHUB_REPOSITORY (e.g. "myuser/openwebrx")
-      IMAGE: ${{ vars.DOCKERHUB_REPOSITORY || format('{0}/openwebrx', secrets.DOCKERHUB_USERNAME) }}
-    steps:
-      - uses: actions/checkout@v4
+  tests:
+    uses: ./.github/workflows/tests.yml
 
-      - uses: docker/setup-qemu-action@v3
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=raw,value=latest
-            type=sha
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+  image:
+    needs: tests
+    uses: ./.github/workflows/build-image.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
