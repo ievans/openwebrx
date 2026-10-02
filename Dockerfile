@@ -46,7 +46,7 @@ RUN apt-get update && \
       libsoapysdr-dev libhackrf-dev && \
     rm -rf /var/lib/apt/lists/*
 
-ARG SOAPYHACKRF_REF=master
+ARG SOAPYHACKRF_REF=763819f4c14c2ef76d00aca002e33fd09a013e30
 WORKDIR /build
 RUN git clone https://github.com/ievans/SoapyHackRF.git soapyhackrf && \
     git -C soapyhackrf checkout "$SOAPYHACKRF_REF" && \
