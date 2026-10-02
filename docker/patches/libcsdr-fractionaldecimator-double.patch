@@ -1,0 +1,79 @@
+From c29de7dc1d93f03d2800614bf423b704230a7add Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 2 Oct 2026 03:34:18 +0000
+Subject: [PATCH] FractionalDecimator: track read position in double to avoid
+ float32 rate drift
+
+---
+ include/fractionaldecimator.hpp |  4 ++--
+ src/lib/fractionaldecimator.cpp | 13 +++++++------
+ 2 files changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/include/fractionaldecimator.hpp b/include/fractionaldecimator.hpp
+index 9e61595..c2104ee 100644
+--- a/include/fractionaldecimator.hpp
++++ b/include/fractionaldecimator.hpp
+@@ -45,13 +45,13 @@ namespace Csdr {
+             bool canProcess() override;
+             void process() override;
+         private:
+-            float where;
++            double where; // double: float32 loses the low bits of `rate` once where reaches the thousands, biasing the resampling ratio
+             unsigned int num_poly_points; //number of samples that the Lagrange interpolator will use
+             float* poly_precalc_denomiator; //while we don't precalculate coefficients here as in a Farrow structure, because it is a fractional interpolator, but we rather precaculate part of the interpolator expression
+             float* coeffs_buf;
+             int xifirst;
+             int xilast;
+-            float rate;
++            double rate;
+             FirFilter<T, float>* filter;
+     };
+ 
+diff --git a/src/lib/fractionaldecimator.cpp b/src/lib/fractionaldecimator.cpp
+index ced063c..aa0ed48 100644
+--- a/src/lib/fractionaldecimator.cpp
++++ b/src/lib/fractionaldecimator.cpp
+@@ -30,6 +30,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+ 
+ #include "fractionaldecimator.hpp"
++#include <cmath>
+ 
+ using namespace Csdr;
+ 
+@@ -65,9 +66,9 @@ FractionalDecimator<T>::~FractionalDecimator() {
+ template <typename T>
+ bool FractionalDecimator<T>::canProcess() {
+     std::lock_guard<std::mutex> lock(this->processMutex);
+-    size_t size = std::min(this->reader->available(), (size_t) ceilf(this->writer->writeable() / rate));
++    size_t size = std::min(this->reader->available(), (size_t) ceil(this->writer->writeable() / rate));
+     size_t filterLen = filter != nullptr ? filter->getOverhead() : 0;
+-    return ceilf(where) + num_poly_points + filterLen < size;
++    return ceil(where) + num_poly_points + filterLen < size;
+ }
+ 
+ template <typename T>
+@@ -78,16 +79,16 @@ void FractionalDecimator<T>::process() {
+     //The pre-filter can be switched off by applying filter = nullptr.
+     int oi = 0; //output index
+     int index_high, index;
+-    size_t size = std::min(this->reader->available(), (size_t) ceilf(this->writer->writeable() / rate));
++    size_t size = std::min(this->reader->available(), (size_t) ceil(this->writer->writeable() / rate));
+     size_t filterLen = filter != nullptr ? filter->getOverhead() : 0;
+     T* input = this->reader->getReadPointer();
+     T* output = this->writer->getWritePointer();
+-    //we optimize to calculate ceilf(where) only once every iteration, so we do it here:
+-    while ((index_high = ceilf(where)) + num_poly_points + filterLen < size) {
++    //we optimize to calculate ceil(where) only once every iteration, so we do it here:
++    while ((index_high = ceil(where)) + num_poly_points + filterLen < size) {
+         // num_poly_points above is theoretically more than we could have here, but this makes the spectrum look good
+         index = index_high - 1;
+         int id = 0;
+-        float xwhere = where - index;
++        float xwhere = (float) (where - index);
+         for (int xi = xifirst; xi <= xilast; xi++) {
+             coeffs_buf[id] = 1;
+             for (int xj = xifirst; xj <= xilast; xj++) {
+-- 
+2.43.0
+

@@ -12,6 +12,31 @@ COPY . .
 RUN DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc -b
 
 
+# Build libcsdr and pycsdr with a fix for FractionalDecimator, whose float32 read
+# position drifts the resampling ratio by tens of ppm (breaks LoRa/Meshtastic at 2.4 Msps).
+# The headers change (private members), so pycsdr must be rebuilt along with libcsdr.
+FROM debian:bookworm-slim AS csdr-build
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates git build-essential cmake debhelper dh-python \
+      python3-all python3-setuptools libpython3-dev libfftw3-dev libsamplerate0-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG CSDR_REF=master
+ARG PYCSDR_REF=master
+WORKDIR /build
+COPY docker/patches/libcsdr-fractionaldecimator-double.patch /build/
+RUN git clone https://github.com/luarvique/csdr.git csdr && \
+    git -C csdr checkout "$CSDR_REF" && \
+    git -C csdr apply /build/libcsdr-fractionaldecimator-double.patch && \
+    cd csdr && dpkg-buildpackage -us -uc -b && \
+    cd .. && dpkg -i libcsdr0_*.deb libcsdr-dev_*.deb && \
+    git clone https://github.com/luarvique/pycsdr.git pycsdr && \
+    git -C pycsdr checkout "$PYCSDR_REF" && \
+    cd pycsdr && dpkg-buildpackage -us -uc -b
+
+
 # Runtime image: install the freshly built package, pulling its
 # dependencies (csdr, owrx-connector, digiham, ...) from the OpenWebRX+ repo
 FROM debian:bookworm-slim
@@ -97,12 +122,15 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /build/openwebrx_*.deb /tmp/
+COPY --from=csdr-build /build/libcsdr0_*.deb /build/python3-csdr_*.deb /tmp/csdr/
 
 # Pin the postinst-created "openwebrx" user to a fixed uid:gid so it's stable
 # across rebuilds, for anyone bind-mounting host dirs into the volumes below.
 RUN apt-get update && \
     apt-get install -y /tmp/openwebrx_*.deb && \
-    rm -rf /tmp/*.deb /var/lib/apt/lists/* && \
+    dpkg -i /tmp/csdr/*.deb && \
+    apt-mark hold libcsdr0 python3-csdr && \
+    rm -rf /tmp/*.deb /tmp/csdr /var/lib/apt/lists/* && \
     usermod -u 1000 openwebrx && \
     groupmod -g 1000 openwebrx && \
     chown -R openwebrx:openwebrx /var/lib/openwebrx
