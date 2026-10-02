@@ -14,15 +14,33 @@ class HackrfSource(SoapyConnectorSource):
     def getDriver(self):
         return "hackrf"
 
+    def getTunerFrequencyProperties(self):
+        return super().getTunerFrequencyProperties() + ["ppm"]
+
+    def getTunerFrequency(self):
+        # SoapyHackRF does not implement frequency correction, so apply it here: with a reference clock running
+        # ppm parts-per-million fast, programming f / (1 + ppm / 1e6) makes the hardware tune to f.
+        freq = super().getTunerFrequency()
+        ppm = self.sdrProps["ppm"] if "ppm" in self.sdrProps else None
+        if ppm:
+            freq = round(freq / (1 + ppm / 1e6))
+        return freq
+
+    def getCommandValues(self):
+        values = super().getCommandValues()
+        # already applied to tuner_freq; the connector must not try to apply it again.
+        values.pop("ppm", None)
+        return values
+
 
 class HackrfDeviceDescription(SoapyConnectorDeviceDescription):
     def getName(self):
         return "HackRF"
 
     def supportsPpm(self):
-        # not implemented by the SoapySDR module.
+        # not implemented by the SoapySDR module, so HackrfSource applies it to the tuned frequency itself.
         # see discussion here: https://groups.io/g/openwebrx/topic/78339109
-        return False
+        return True
 
     def getInputs(self) -> List[Input]:
         return super().getInputs() + [BiasTeeInput()]
