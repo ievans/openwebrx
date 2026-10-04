@@ -1,0 +1,82 @@
+#!/bin/bash
+# PID 1 of the OpenWebRX+ Firecracker microVM. Replaces the container runtime:
+# mounts the pseudo filesystems and the data disk, configures the network from the
+# kernel command line, then runs `openwebrx` as the unprivileged openwebrx user.
+#
+# Kernel command line parameters (set by run.sh):
+#   owrx.ip=ADDR/PREFIX   guest address        owrx.gw=ADDR   default gateway
+#   owrx.dns=ADDR         resolver (optional)  owrx.time=EPOCH  wall clock (no RTC in Firecracker)
+set -u
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev
+mkdir -p /dev/pts /dev/shm
+mount -t devpts devpts /dev/pts
+mount -t tmpfs -o mode=1777 tmpfs /tmp
+mount -t tmpfs -o mode=755 tmpfs /run
+mount -t tmpfs -o mode=1777 tmpfs /var/tmp
+
+poweroff_vm() {
+  sync
+  # Firecracker exits when the guest powers off / resets
+  echo o > /proc/sysrq-trigger
+  sleep 5
+  exit 0
+}
+
+cmdline_get() {
+  local p
+  for p in $(cat /proc/cmdline); do
+    case "$p" in "$1="*) echo "${p#*=}"; return ;; esac
+  done
+}
+
+# --- clock ---------------------------------------------------------------
+t=$(cmdline_get owrx.time)
+[ -n "$t" ] && date -s "@$t" >/dev/null 2>&1
+
+# --- network -------------------------------------------------------------
+ip link set lo up
+ip=$(cmdline_get owrx.ip); gw=$(cmdline_get owrx.gw); dns=$(cmdline_get owrx.dns)
+if [ -n "$ip" ] && [ -e /sys/class/net/eth0 ]; then
+  ip addr add "$ip" dev eth0
+  ip link set eth0 up
+  [ -n "$gw" ] && ip route add default via "$gw"
+  [ -n "$dns" ] && echo "nameserver $dns" > /etc/resolv.conf
+fi
+
+# --- persistent data -----------------------------------------------------
+# /dev/vdb (second drive) replaces the docker volumes /etc/openwebrx and /var/lib/openwebrx.
+mkdir -p /mnt/data
+if ! mount -t ext4 /dev/vdb /mnt/data; then
+  echo "owrx-init: no data disk, using ephemeral (tmpfs) config and data" >&2
+  mount -t tmpfs -o mode=755 tmpfs /mnt/data
+fi
+mkdir -p /mnt/data/etc /mnt/data/lib
+# first boot: seed with the packaged defaults, like docker does for a new volume
+[ -z "$(ls -A /mnt/data/etc)" ] && cp -a /etc/openwebrx/. /mnt/data/etc/
+[ -z "$(ls -A /mnt/data/lib)" ] && cp -a /var/lib/openwebrx/. /mnt/data/lib/
+chown openwebrx:openwebrx /mnt/data/etc /mnt/data/lib
+mount --bind /mnt/data/etc /etc/openwebrx
+mount --bind /mnt/data/lib /var/lib/openwebrx
+
+# --- environment ---------------------------------------------------------
+# Optional OPENWEBRX_* settings (admin user, ...) live in /var/lib/openwebrx/vm.env on the
+# data disk, not on the kernel command line, which is world-readable via /proc/cmdline.
+set -a
+[ -r /var/lib/openwebrx/vm.env ] && . /var/lib/openwebrx/vm.env
+set +a
+export HOME=/tmp
+
+# --- run -----------------------------------------------------------------
+# Ctrl-Alt-Del (Firecracker's SendCtrlAltDel) reaches init as SIGINT; forward it as SIGTERM.
+setpriv --reuid=openwebrx --regid=openwebrx --init-groups openwebrx &
+child=$!
+trap 'kill -TERM "$child" 2>/dev/null' INT TERM
+while kill -0 "$child" 2>/dev/null; do wait "$child"; done
+wait "$child"
+rc=$?
+echo "owrx-init: openwebrx exited with status $rc, powering off" >&2
+poweroff_vm
