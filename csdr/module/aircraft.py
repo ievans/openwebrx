@@ -1,6 +1,7 @@
 from pycsdr.modules import ExecModule
 from pycsdr.types import Format
 from owrx.config import Config
+from owrx.sandbox import sandboxed
 
 import os
 
@@ -24,7 +25,7 @@ class DumpVdl2Module(ExecModule):
             "decoded:%s:file:path=-" % ("json" if jsonOutput else "text"),
             "--decode-fragments", "--utc"
         ]
-        super().__init__(Format.COMPLEX_SHORT, Format.CHAR, cmd)
+        super().__init__(Format.COMPLEX_SHORT, Format.CHAR, sandboxed(cmd))
 
 
 class Dump1090Module(ExecModule):
@@ -72,5 +73,5 @@ class AcarsDecModule(ExecModule):
             "acarsdec", "--sndfile", "/dev/stdin,subtype=6",
             "--output", str("json:file" if self.jsonOutput else "full:file")
         ]
-        super().__init__(Format.FLOAT, Format.CHAR, cmd)
+        super().__init__(Format.FLOAT, Format.CHAR, sandboxed(cmd))
 

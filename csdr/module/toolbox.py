@@ -2,6 +2,7 @@ from pycsdr.modules import ExecModule
 from pycsdr.types import Format
 from csdr.module import PopenModule
 from owrx.config import Config
+from owrx.sandbox import sandboxed
 
 
 class Rtl433Module(ExecModule):
@@ -15,7 +16,7 @@ class Rtl433Module(ExecModule):
         pm = Config.get()
         if pm["ism_report_levels"]:
             cmd += ["-M", "level"]
-        super().__init__(Format.COMPLEX_FLOAT, Format.CHAR, cmd)
+        super().__init__(Format.COMPLEX_FLOAT, Format.CHAR, sandboxed(cmd))
 
 
 class MultimonModule(ExecModule):
@@ -24,7 +25,7 @@ class MultimonModule(ExecModule):
         cmd = ["multimon-ng", "-", "-v0", "-C", pm["paging_charset"], "-c"]
         for x in decoders:
             cmd += ["-a", x]
-        super().__init__(Format.SHORT, Format.CHAR, cmd)
+        super().__init__(Format.SHORT, Format.CHAR, sandboxed(cmd))
 
 
 class WavFileModule(PopenModule):
