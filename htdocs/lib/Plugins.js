@@ -10,7 +10,7 @@ function Plugins() {}
 
 Plugins.addButton = function(id, title, handler = null, color = null) {
     var $stack = $('#openwebrx-panel-plugins');
-    if (!$stack) return null;
+    if (!$stack.length) return null;
 
     var $button = $(
       '<div class="openwebrx-button openwebrx-plugin-button"'
@@ -31,7 +31,7 @@ Plugins.addButton = function(id, title, handler = null, color = null) {
 
 Plugins.toggleWindow = function(id, on) {
     var $window = $('#plugin-window-' + id);
-    if (!$window) return;
+    if (!$window.length) return;
 
     if (typeof(on) === 'undefined')
         on = !$window.is(':visible');
@@ -45,7 +45,7 @@ Plugins.addWindow = function(id, title, content = '') {
     if ($window.length > 0) return $window[0];
 
     var $page = $('#webrx-page-container');
-    if (!$page) return null;
+    if (!$page.length) return null;
 
     var $window = $(
       '<div class="openwebrx-plugin-window" id="plugin-window-' + id + '">'
@@ -121,8 +121,8 @@ Plugins.addWindow = function(id, title, content = '') {
 
 Plugins.toggleSection = function(id, on) {
     var $section = $('#plugin-section-' + id);
-    if (!$section) return;
-    UI.toggleSection($section[0]);
+    if (!$section.length) return;
+    UI.toggleSection($section[0], on);
 }
 
 Plugins.addSection = function(id, title, content = '') {
@@ -135,7 +135,7 @@ Plugins.addSection = function(id, title, content = '') {
 
     $section.insertBefore('#openwebrx-section-settings');
     UI.toggleSection($section[0], LS.has(id)? LS.loadBool(id) : false);
-    return $section[0];
+    return $section[0].nextElementSibling;
 };
 
 //
@@ -173,7 +173,6 @@ MapPlugin.create = function() {
 function SunPlugin() {}
 
 SunPlugin.myname = 'sun';
-SunPlugin.iframe = null;
 
 SunPlugin.init = function() {
     Plugins.addButton(this.myname, 'SUN', this.create);
@@ -203,3 +202,106 @@ SunPlugin.create = function() {
 
     Plugins.toggleWindow(SunPlugin.myname);
 }
+
+//
+// Add magic key entry to the Settings section.
+//
+
+function KeyPlugin() {}
+
+KeyPlugin.myname = 'key';
+
+KeyPlugin.init = function() {
+    var settings = document.querySelector('#openwebrx-section-settings');
+    if (!settings) return;
+
+    settings = settings.nextElementSibling;
+    if (!settings) return;
+
+    settings.insertAdjacentHTML('beforeend',
+      '<div class="openwebrx-panel-line" style="display:flex;gap:10px;padding:5px 0px;align-items:center;">'
+    + '<label for="magic-key-input" style="flex:none;">Key</label>'
+    + '<input type="text" id="magic-key-input" style="flex:1;min-width:0;box-sizing:border-box">'
+    + '</div>'
+    );
+
+    var input = settings.querySelector('#magic-key-input');
+    input.value = UI.getDemodulatorPanel().getMagicKey() || LS.loadStr('magic-key') || '';
+    UI.getDemodulatorPanel().setMagicKey(input.value);
+    input.addEventListener('change', () => {
+        UI.getDemodulatorPanel().setMagicKey(input.value);
+        LS.save('magic-key', input.value);
+    });
+};
+
+//
+// Add TRANSMIT button for connected transceivers.
+//
+
+function RigPlugin() {}
+
+RigPlugin.myname = 'rig';
+RigPlugin.ptt = null;
+RigPlugin.tx = false;
+
+RigPlugin.start = function() {
+    if (RigPlugin.ptt && !RigPlugin.tx) {
+        RigPlugin.ptt.style.background = 'red';
+        RigPlugin.ptt.style.color = 'white';
+        RigPlugin.tx = true;
+        ws.send(JSON.stringify({ 'type': 'txcontrol', 'action': 'start' }));
+    }
+};
+
+RigPlugin.stop = function() {
+    if (RigPlugin.ptt && RigPlugin.tx) {
+        RigPlugin.ptt.style.background = 'white';
+        RigPlugin.ptt.style.color = 'red';
+        RigPlugin.tx = false;
+        ws.send(JSON.stringify({ 'type': 'txcontrol', 'action': 'stop' }));
+    }
+};
+
+RigPlugin.init = function() {
+    // Do not initialize twice
+    if (RigPlugin.ptt) return;
+
+    var content =
+      '<div class="openwebrx-panel-line" style="display:grid;justify-items:center;">'
+    + '<input type="button" class="openwebrx-button" value="&#9003; TRANSMIT" '
+    + 'style="width:95%;font-size:12pt;font-weight:bold;background:white;color:red;">'
+    + '</div>';
+    var ptt = Plugins.addSection(this.myname, 'Rig', content).querySelector('input');
+    this.ptt = ptt;
+
+    ptt.addEventListener('pointerdown', this.start);
+    ptt.addEventListener('pointerleave', this.stop);
+    ptt.addEventListener('pointerup', this.stop);
+
+    // When BACKSPACE pressed...
+    document.body.addEventListener('keydown', (e) => {
+        // Do not push twice
+        if (RigPlugin.tx) return;
+        // Do not proceed if focused on an input or list selector
+        var tag = document.activeElement? document.activeElement.tagName : null;
+        if (tag && (tag === 'INPUT' || tag === 'TEXTAREA'))
+            return;
+        // Simulate pointer-down event on BACKSPACE
+        if (e.key.toLowerCase() === 'backspace') {
+            ptt.dispatchEvent(new PointerEvent('pointerdown', {
+                bubbles: true, cancelable: true, view: window
+            }));
+        }
+    });
+
+    // When any key released...
+    document.body.addEventListener('keyup', (e) => {
+        // Do not release twice
+        if (!RigPlugin.tx) return;
+        // Simulate pointer-up event
+        ptt.dispatchEvent(new PointerEvent('pointerup', {
+            bubbles: true, cancelable: true, view: window
+        }));
+    });
+};
+
