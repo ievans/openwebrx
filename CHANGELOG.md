@@ -1,3 +1,25 @@
+**1.2.126**
+- Added Evening Wave waterfall theme by Nikolay Akishin.
+- Added option to restrict logins to local network.
+- Added validation for URL settings.
+- Added validation for RigCtl device setting.
+- Added validation for FiFi SDR device setting.
+- Fixed APRS reporter dropping non-ASCII messages [Nico Rey].
+- Fixed redirection to external URLs via ?ref=...
+- Fixed relative path parsing.
+- Fixed JavaScript plugin issues.
+- Upgraded Moment.js library to version 2.31.0.
+- Upgraded JQuery library to version 3.7.1.
+
+**1.2.125**
+- Added optional ability to press RigControl PTT.
+- Added sample Solar Weather plugin.
+- Added sample magic key entry plugin.
+- Added sample PTT button plugin.
+- Made mouse pointer frequency show up in single Hz.
+- Made Plugins.addSection() return reference to content.
+- Narrowed SNR window to 1/256 of total bandwidth.
+
 **1.2.124**
 - Renamed "Server memory" status field to "System memory" and fixed its text overflowing on systems with large amounts of RAM.
 - "System memory" now reports the container's cgroup memory limit when running under one, instead of always showing whole-host memory.

@@ -125,7 +125,7 @@ class CompiledAssetsController(GzipMixin, ModificationAwareController):
         "receiver.js": [
             "lib/chroma.min.js",
             "openwebrx.js",
-            "lib/jquery-3.2.1.min.js",
+            "lib/jquery-3.7.1.min.js",
             "lib/jquery.nanoscroller.min.js",
             "lib/lame.min.js",
             "lib/Header.js",
@@ -157,7 +157,7 @@ class CompiledAssetsController(GzipMixin, ModificationAwareController):
             "lib/UI.js",
         ],
         "map-google.js": [
-            "lib/jquery-3.2.1.min.js",
+            "lib/jquery-3.7.1.min.js",
             "lib/chroma.min.js",
             "lib/Header.js",
             "lib/MapCalls.js",
@@ -171,7 +171,7 @@ class CompiledAssetsController(GzipMixin, ModificationAwareController):
             "map-google.js",
         ],
         "map-leaflet.js": [
-            "lib/jquery-3.2.1.min.js",
+            "lib/jquery-3.7.1.min.js",
             "lib/chroma.min.js",
             "lib/Header.js",
             "lib/MapCalls.js",
@@ -185,7 +185,7 @@ class CompiledAssetsController(GzipMixin, ModificationAwareController):
             "map-leaflet.js",
         ],
         "settings.js": [
-            "lib/jquery-3.2.1.min.js",
+            "lib/jquery-3.7.1.min.js",
             "lib/bootstrap.bundle.min.js",
             "lib/location-picker.min.js",
             "lib/Header.js",
