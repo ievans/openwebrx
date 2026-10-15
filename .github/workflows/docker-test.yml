@@ -65,15 +65,13 @@ jobs:
       - name: SDRplay module links against the API and the service stays up
         run: |
           docker exec owrx-test sh -c '
-            set -eux
+            set -eu
             mod=$(find /usr/lib -name libsdrPlaySupport.so | head -1)
             test -n "$mod"
-            ldd "$mod"
             ldd "$mod" | grep -q "libsdrplay_api.so.3 => /usr/local/lib/"
             if ldd "$mod" | grep -q "not found"; then ldd "$mod"; exit 1; fi
-            ls /usr/local/bin /usr/local/lib
-            cat /proc/[0-9]*/comm
-            grep -qx sdrplay_apiService /proc/[0-9]*/comm
+            # comm is truncated to 15 characters
+            grep -qx sdrplay_apiServ /proc/[0-9]*/comm
           '
 
       - name: Container logs
