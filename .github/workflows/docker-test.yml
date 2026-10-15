@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - Dockerfile
+      - docker/**
       - .github/workflows/docker-test.yml
   push:
     branches: [master]
     paths:
       - Dockerfile
+      - docker/**
       - .github/workflows/docker-test.yml
 
 jobs:
@@ -57,6 +59,19 @@ jobs:
         run: |
           docker exec owrx-test id
           docker exec owrx-test grep -E '^(Uid|CapEff)' /proc/1/status
+
+      # The image embeds the SDRplay API (personal use). Same hardening as above:
+      # a service that needs root or a capability fails here, not on first use.
+      - name: SDRplay module links against the API and the service stays up
+        run: |
+          docker exec owrx-test sh -c '
+            set -eu
+            mod=$(find /usr/lib -name libsdrPlaySupport.so | head -1)
+            test -n "$mod"
+            ldd "$mod" | grep -q "libsdrplay_api.so.3 => /usr/local/lib/"
+            if ldd "$mod" | grep -q "not found"; then ldd "$mod"; exit 1; fi
+            grep -qx sdrplay_apiService /proc/[0-9]*/comm
+          '
 
       - name: Container logs
         if: always()

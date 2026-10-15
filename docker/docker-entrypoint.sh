@@ -1,13 +1,14 @@
 #!/bin/sh
-# The SDRplay API needs its own daemon next to the SoapySDR module. Keep it
-# alive in the background, then become openwebrx so signals and exit codes
-# reach the container as before.
-if [ -x /opt/sdrplay_api/sdrplay_apiService ]; then
-  (
-    while :; do
-      /opt/sdrplay_api/sdrplay_apiService >/dev/null 2>&1
-      sleep 2
-    done
-  ) &
-fi
+# The SDRplay API client library talks to sdrplay_apiService, which must run beside it.
+# Keep it running for the container's lifetime; it dies with the container when
+# openwebrx (PID 1 after the exec) does.
+set -eu
+
+(
+  while :; do
+    sdrplay_apiService || true
+    sleep 5
+  done
+) &
+
 exec "$@"
