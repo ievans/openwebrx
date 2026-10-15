@@ -146,6 +146,7 @@ RUN apt-get update && \
       owrx-connector \
       python3-csdr \
       libusb-1.0-0 \
+      soapysdr-tools \
       libudev1 && \
     AVAILABLE_RECOMMENDS="" && \
     for pkg in \
