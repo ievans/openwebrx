@@ -18,6 +18,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # SDRplay has no public download link. SDRPLAY_INSTALLER_URL (repository
+      # secret) points at a copy you host; the Dockerfile checks its MD5 and
+      # building with it accepts the SDRplay licence.
+      - name: Fetch SDRplay API installer
+        env:
+          SDRPLAY_INSTALLER_URL: ${{ secrets.SDRPLAY_INSTALLER_URL }}
+        run: |
+          if [ -z "$SDRPLAY_INSTALLER_URL" ]; then
+            echo "::error::secret SDRPLAY_INSTALLER_URL is not set"; exit 1
+          fi
+          curl -fsSL -o docker/vendor/SDRplay_RSP_API-Linux-3.15.2.run "$SDRPLAY_INSTALLER_URL"
+
       - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
@@ -38,6 +50,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
+          build-args: REQUIRE_SDRPLAY=1
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

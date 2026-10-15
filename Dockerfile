@@ -69,6 +69,8 @@ RUN apt-get update && \
 
 ARG SDRPLAY_BINARY=SDRplay_RSP_API-Linux-3.15.2.run
 ARG SDRPLAY_MD5=92feae82c39d2e33eec13fc5662a3b9b
+# Set to 1 (published image) to fail the build instead of silently omitting SDRplay.
+ARG REQUIRE_SDRPLAY=0
 WORKDIR /build
 COPY docker/patches/SDRplay_RSP_API-Linux-3.15.2.run.patch /build/sdrplay.patch
 COPY docker/vendor/ /build/vendor/
@@ -82,6 +84,8 @@ RUN mkdir -p /out/opt /out/usr/local/lib && \
       test -x /opt/sdrplay_api/sdrplay_apiService && \
       cp -a /opt/sdrplay_api /out/opt/ && \
       cp -a /usr/local/lib/libsdrplay_api.so* /out/usr/local/lib/; \
+    elif [ "$REQUIRE_SDRPLAY" = 1 ]; then \
+      echo "REQUIRE_SDRPLAY=1 but vendor/$SDRPLAY_BINARY is missing" >&2; exit 1; \
     else \
       echo "No SDRplay installer in docker/vendor/; building without the SDRplay API"; \
     fi
