@@ -55,29 +55,36 @@ RUN git clone https://github.com/ievans/SoapyHackRF.git soapyhackrf && \
     DESTDIR=/out cmake --install soapyhackrf/build
 
 
-# Install the proprietary SDRplay API (libsdrplay_api + sdrplay_apiService). The vendor
-# installer is interactive, so a patch strips its prompts; running this build is what
-# accepts the SDRplay licence (sdrplay_license.txt inside the .run). Only /opt/sdrplay_api
-# and the shared library are copied into the runtime image.
+# Install the proprietary SDRplay API (libsdrplay_api + sdrplay_apiService) if the vendor
+# installer is in docker/vendor/ (SDRplay has no stable public download link; see the
+# README there). The installer is interactive, so a patch strips its prompts; building
+# with it present is what accepts the SDRplay licence. Without it the stage is empty and
+# the image builds without the SDRplay API.
 FROM debian:bookworm-slim AS sdrplay-build
 
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      ca-certificates curl patch sudo file && \
+      patch sudo file && \
     rm -rf /var/lib/apt/lists/*
 
 ARG SDRPLAY_BINARY=SDRplay_RSP_API-Linux-3.15.2.run
 ARG SDRPLAY_MD5=92feae82c39d2e33eec13fc5662a3b9b
 WORKDIR /build
 COPY docker/patches/SDRplay_RSP_API-Linux-3.15.2.run.patch /build/sdrplay.patch
-RUN curl -fsSL -o "$SDRPLAY_BINARY" "https://www.sdrplay.com/software/$SDRPLAY_BINARY" && \
-    echo "$SDRPLAY_MD5  $SDRPLAY_BINARY" | md5sum -c - && \
-    sh "$SDRPLAY_BINARY" --noexec --target sdrplay && \
-    patch -Np0 < sdrplay.patch && \
-    mkdir -p /etc/udev/rules.d && \
-    cd sdrplay && ./install_lib.sh && \
-    test -x /opt/sdrplay_api/sdrplay_apiService && \
-    ls /usr/local/lib/libsdrplay_api.so*
+COPY docker/vendor/ /build/vendor/
+RUN mkdir -p /out/opt /out/usr/local/lib && \
+    if [ -f "vendor/$SDRPLAY_BINARY" ]; then \
+      echo "$SDRPLAY_MD5  vendor/$SDRPLAY_BINARY" | md5sum -c - && \
+      sh "vendor/$SDRPLAY_BINARY" --noexec --target sdrplay && \
+      patch -Np0 < sdrplay.patch && \
+      mkdir -p /etc/udev/rules.d && \
+      (cd sdrplay && ./install_lib.sh) && \
+      test -x /opt/sdrplay_api/sdrplay_apiService && \
+      cp -a /opt/sdrplay_api /out/opt/ && \
+      cp -a /usr/local/lib/libsdrplay_api.so* /out/usr/local/lib/; \
+    else \
+      echo "No SDRplay installer in docker/vendor/; building without the SDRplay API"; \
+    fi
 
 
 # Runtime image: install the freshly built package, pulling its
@@ -169,8 +176,7 @@ RUN apt-get update && \
 
 COPY --from=build /build/openwebrx_*.deb /tmp/
 COPY --from=soapyhackrf-build /out/ /
-COPY --from=sdrplay-build /opt/sdrplay_api /opt/sdrplay_api
-COPY --from=sdrplay-build /usr/local/lib/libsdrplay_api.so* /usr/local/lib/
+COPY --from=sdrplay-build /out/ /
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --from=csdr-build /build/libcsdr0_*.deb /build/python3-csdr_*.deb /tmp/csdr/
 
