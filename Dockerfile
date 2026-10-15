@@ -55,6 +55,58 @@ RUN git clone https://github.com/ievans/SoapyHackRF.git soapyhackrf && \
     DESTDIR=/out cmake --install soapyhackrf/build
 
 
+# SDRplay API (proprietary; personal-use image, not for redistribution). The download URL
+# is unversioned and carries a per-request token, so scrape the link from the vendor page
+# and pin the checksum: a new upstream release fails the build rather than changing it.
+# Building this image accepts the SDRplay licence (sdrplay_license.txt, copied into it).
+FROM debian:bookworm-slim AS sdrplay-api
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG SDRPLAY_API_SHA256=3a97ca764263bbe76fb0f2220e6408942357e8864c19e1408a6d6987af382fe3
+RUN set -eu; \
+    url=$(curl -fsSL https://sdrplay.com/hardware-api/ \
+      | grep -oE 'https://sdrplay.com/download/hardware-api-linux/\?wpdmdl=[0-9]+(&#038;|&amp;|&)refresh=[0-9a-f]+' \
+      | head -1 | sed 's/&#038;/\&/; s/&amp;/\&/'); \
+    curl -fsSL -o /tmp/sdrplay.run "$url"; \
+    echo "$SDRPLAY_API_SHA256  /tmp/sdrplay.run" | sha256sum -c -; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) arch=amd64 ;; \
+      arm64) arch=arm64 ;; \
+      *) echo "SDRplay API: unsupported architecture" >&2; exit 1 ;; \
+    esac; \
+    sh /tmp/sdrplay.run --noexec --nox11 --target /tmp/sdrplay; \
+    mkdir -p /out/usr/local/bin /out/usr/local/lib /out/usr/local/include /out/usr/share/doc/sdrplay-api; \
+    install -m 0755 "/tmp/sdrplay/$arch/sdrplay_apiService" /out/usr/local/bin/; \
+    install -m 0644 "/tmp/sdrplay/$arch/libsdrplay_api.so.3.15" /out/usr/local/lib/; \
+    install -m 0644 /tmp/sdrplay/inc/*.h /out/usr/local/include/; \
+    install -m 0644 /tmp/sdrplay/sdrplay_license.txt /out/usr/share/doc/sdrplay-api/
+
+
+# The OpenWebRX+ maintainer's SoapySDRPlay3 fork (tag 0.8.11; RSPdx-R2 support, API 3.15.2).
+FROM debian:bookworm-slim AS soapysdrplay-build
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates git build-essential cmake pkg-config libsoapysdr-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Its CMake finder looks for sdrplay_api.h and libsdrplay_api under /usr/local.
+COPY --from=sdrplay-api /out/usr/local/ /usr/local/
+RUN ln -s libsdrplay_api.so.3.15 /usr/local/lib/libsdrplay_api.so && ldconfig
+
+ARG SOAPYSDRPLAY3_REF=146ce1c2f6ecfe913cb37a7431f80713e43a5339
+WORKDIR /build
+RUN git clone https://github.com/luarvique/SoapySDRPlay3.git soapysdrplay3 && \
+    git -C soapysdrplay3 checkout "$SOAPYSDRPLAY3_REF" && \
+    cmake -S soapysdrplay3 -B soapysdrplay3/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr && \
+    cmake --build soapysdrplay3/build -j"$(nproc)" && \
+    DESTDIR=/out cmake --install soapysdrplay3/build
+
+
 # Runtime image: install the freshly built package, pulling its
 # dependencies (csdr, owrx-connector, digiham, ...) from the OpenWebRX+ repo
 FROM debian:bookworm-slim
@@ -92,7 +144,9 @@ RUN apt-get update && \
       python3-pkg-resources \
       python3-distutils-extra \
       owrx-connector \
-      python3-csdr && \
+      python3-csdr \
+      libusb-1.0-0 \
+      libudev1 && \
     AVAILABLE_RECOMMENDS="" && \
     for pkg in \
       python3-digiham \
@@ -141,6 +195,11 @@ RUN apt-get update && \
 
 COPY --from=build /build/openwebrx_*.deb /tmp/
 COPY --from=soapyhackrf-build /out/ /
+COPY --from=sdrplay-api /out/usr/local/bin/ /usr/local/bin/
+COPY --from=sdrplay-api /out/usr/local/lib/ /usr/local/lib/
+COPY --from=sdrplay-api /out/usr/share/doc/sdrplay-api/ /usr/share/doc/sdrplay-api/
+COPY --from=soapysdrplay-build /out/ /
+COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --from=csdr-build /build/libcsdr0_*.deb /build/python3-csdr_*.deb /tmp/csdr/
 
 # Pin the postinst-created "openwebrx" user to a fixed uid:gid so it's stable
@@ -152,7 +211,8 @@ RUN apt-get update && \
     rm -rf /tmp/*.deb /tmp/csdr /var/lib/apt/lists/* && \
     usermod -u 1000 openwebrx && \
     groupmod -g 1000 openwebrx && \
-    chown -R openwebrx:openwebrx /var/lib/openwebrx
+    chown -R openwebrx:openwebrx /var/lib/openwebrx && \
+    ldconfig
 
 VOLUME /etc/openwebrx
 VOLUME /var/lib/openwebrx
@@ -163,4 +223,5 @@ EXPOSE 8073
 ENV HOME=/tmp
 USER openwebrx
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["openwebrx"]
