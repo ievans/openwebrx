@@ -1,0 +1,81 @@
+name: Docker SDRplay variant test
+
+# Builds the opt-in `sdrplay` target. The SDRplay API is fetched onto the runner
+# only to build and test; nothing here is pushed anywhere.
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - docker/**
+      - .github/workflows/docker-sdrplay-test.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sdrplay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # The URL is unversioned, so a new SDRplay release fails the Dockerfile's
+      # checksum rather than silently changing the build.
+      - name: Fetch the SDRplay API installer
+        run: |
+          set -eu
+          file=$(sed -n 's/^ARG SDRPLAY_API_FILE=//p' Dockerfile)
+          mkdir sdrplay-installer
+          page=$(curl -fsSL https://sdrplay.com/hardware-api/)
+          url=$(printf '%s' "$page" \
+            | grep -oE 'https://sdrplay.com/download/hardware-api-linux/\?wpdmdl=[0-9]+(&#038;|&amp;|&)refresh=[0-9a-f]+' \
+            | head -1 | sed 's/&#038;/\&/; s/&amp;/\&/')
+          curl -fsSL -o "sdrplay-installer/$file" "$url"
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: sdrplay
+          build-contexts: sdrplay-installer=sdrplay-installer
+          build-args: SDRPLAY_ACCEPT_LICENSE=yes
+          platforms: linux/amd64
+          load: true
+          tags: openwebrx-sdrplay-test:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,scope=sdrplay
+
+      # Same hardening the README recommends. A service that needs root or a
+      # capability fails here rather than on the first run with a radio.
+      - name: Module links against the API and the service stays up
+        run: |
+          docker run --rm --entrypoint sh \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            --read-only --tmpfs /tmp:mode=1777 \
+            openwebrx-sdrplay-test:latest -c '
+              set -eu
+              mod=$(find /usr/lib -name libsdrPlaySupport.so | head -1)
+              test -n "$mod"
+              ldd "$mod" | grep -q "libsdrplay_api.so.3 => /usr/local/lib/"
+              if ldd "$mod" | grep -q "not found"; then ldd "$mod"; exit 1; fi
+              rc=0
+              timeout 5 sdrplay_apiService >/dev/null 2>&1 || rc=$?
+              # 124: still running when timeout stopped it
+              test "$rc" -eq 124
+            '
+
+      - name: Build (arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: sdrplay
+          build-contexts: sdrplay-installer=sdrplay-installer
+          build-args: SDRPLAY_ACCEPT_LICENSE=yes
+          platforms: linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,scope=sdrplay-arm64

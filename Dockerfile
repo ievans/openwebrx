@@ -55,9 +55,62 @@ RUN git clone https://github.com/ievans/SoapyHackRF.git soapyhackrf && \
     DESTDIR=/out cmake --install soapyhackrf/build
 
 
+# SDRplay support is opt-in (`--target sdrplay`, see docker/SDRPLAY.md) and never part
+# of the default image: the SDRplay API is proprietary and its licence grants no
+# redistribution right, so a published image must not contain it.
+#
+# Unpack the user-supplied installer, from the named build context `sdrplay-installer`.
+# The pinned checksum means a new SDRplay release fails the build instead of changing it.
+FROM debian:bookworm-slim AS sdrplay-api
+
+ARG SDRPLAY_ACCEPT_LICENSE=
+ARG SDRPLAY_API_FILE=SDRplay_RSP_API-Linux-3.15.2.run
+ARG SDRPLAY_API_SHA256=3a97ca764263bbe76fb0f2220e6408942357e8864c19e1408a6d6987af382fe3
+
+COPY --from=sdrplay-installer /${SDRPLAY_API_FILE} /tmp/sdrplay.run
+
+RUN set -eu; \
+    [ "$SDRPLAY_ACCEPT_LICENSE" = yes ] || { \
+      echo "Read the SDRplay licence, then build with --build-arg SDRPLAY_ACCEPT_LICENSE=yes" >&2; exit 1; }; \
+    echo "$SDRPLAY_API_SHA256  /tmp/sdrplay.run" | sha256sum -c -; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) arch=amd64 ;; \
+      arm64) arch=arm64 ;; \
+      *) echo "SDRplay API: unsupported architecture" >&2; exit 1 ;; \
+    esac; \
+    sh /tmp/sdrplay.run --noexec --nox11 --target /tmp/sdrplay; \
+    mkdir -p /out/usr/local/bin /out/usr/local/lib /out/usr/local/include /out/usr/share/doc/sdrplay-api; \
+    install -m 0755 "/tmp/sdrplay/$arch/sdrplay_apiService" /out/usr/local/bin/; \
+    install -m 0644 "/tmp/sdrplay/$arch/libsdrplay_api.so.3.15" /out/usr/local/lib/; \
+    install -m 0644 /tmp/sdrplay/inc/*.h /out/usr/local/include/; \
+    install -m 0644 /tmp/sdrplay/sdrplay_license.txt /out/usr/share/doc/sdrplay-api/
+
+
+# The OpenWebRX+ maintainer's SoapySDRPlay3 fork, which OpenWebRX+ itself builds against.
+# 0.8.9 added RSPdx-R2 support; 0.8.10 and later target API 3.15.2.
+FROM debian:bookworm-slim AS soapysdrplay-build
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates git build-essential cmake pkg-config libsoapysdr-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Its CMake finder looks for sdrplay_api.h and libsdrplay_api under /usr/local.
+COPY --from=sdrplay-api /out/usr/local/ /usr/local/
+RUN ln -s libsdrplay_api.so.3.15 /usr/local/lib/libsdrplay_api.so && ldconfig
+
+ARG SOAPYSDRPLAY3_REF=146ce1c2f6ecfe913cb37a7431f80713e43a5339
+WORKDIR /build
+RUN git clone https://github.com/luarvique/SoapySDRPlay3.git soapysdrplay3 && \
+    git -C soapysdrplay3 checkout "$SOAPYSDRPLAY3_REF" && \
+    cmake -S soapysdrplay3 -B soapysdrplay3/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr && \
+    cmake --build soapysdrplay3/build -j"$(nproc)" && \
+    DESTDIR=/out cmake --install soapysdrplay3/build
+
+
 # Runtime image: install the freshly built package, pulling its
 # dependencies (csdr, owrx-connector, digiham, ...) from the OpenWebRX+ repo
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim AS runtime
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -164,3 +217,24 @@ ENV HOME=/tmp
 USER openwebrx
 
 CMD ["openwebrx"]
+
+
+# Opt-in SDRplay variant: never pushed to a public registry (see docker/SDRPLAY.md).
+FROM runtime AS sdrplay
+
+USER root
+COPY --from=sdrplay-api /out/usr/local/bin/ /usr/local/bin/
+COPY --from=sdrplay-api /out/usr/local/lib/ /usr/local/lib/
+COPY --from=sdrplay-api /out/usr/share/doc/sdrplay-api/ /usr/share/doc/sdrplay-api/
+COPY --from=soapysdrplay-build /out/ /
+COPY --chmod=0755 docker/sdrplay-entrypoint.sh /usr/local/bin/sdrplay-entrypoint
+RUN ldconfig
+USER openwebrx
+
+ENTRYPOINT ["sdrplay-entrypoint"]
+CMD ["openwebrx"]
+
+
+# Default target, kept last: a plain `docker build` (and the publish workflow) gets
+# the image without any SDRplay software.
+FROM runtime AS openwebrx
