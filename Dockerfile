@@ -125,7 +125,6 @@ RUN apt-get update && \
       python3-distutils-extra \
       owrx-connector \
       python3-csdr \
-      soapysdr-module-sdrplay3 \
       libusb-1.0-0 \
       libudev1 && \
     AVAILABLE_RECOMMENDS="" && \
@@ -184,13 +183,15 @@ COPY --from=csdr-build /build/libcsdr0_*.deb /build/python3-csdr_*.deb /tmp/csdr
 # across rebuilds, for anyone bind-mounting host dirs into the volumes below.
 RUN apt-get update && \
     apt-get install -y /tmp/openwebrx_*.deb && \
+    if [ -e /usr/local/lib/libsdrplay_api.so ]; then \
+      ldconfig && apt-get install -y soapysdr-module-sdrplay3; \
+    fi && \
     dpkg -i /tmp/csdr/*.deb && \
     apt-mark hold libcsdr0 python3-csdr && \
     rm -rf /tmp/*.deb /tmp/csdr /var/lib/apt/lists/* && \
     usermod -u 1000 openwebrx && \
     groupmod -g 1000 openwebrx && \
-    chown -R openwebrx:openwebrx /var/lib/openwebrx && \
-    ldconfig
+    chown -R openwebrx:openwebrx /var/lib/openwebrx
 
 VOLUME /etc/openwebrx
 VOLUME /var/lib/openwebrx
