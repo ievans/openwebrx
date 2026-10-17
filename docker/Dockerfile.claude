@@ -1,0 +1,15 @@
+# "claude" profile: the regular OpenWebRX+ image plus the Claude Code CLI.
+#   docker build -f docker/Dockerfile.claude --build-arg BASE_IMAGE=<image> -t openwebrx:claude .
+ARG BASE_IMAGE=openwebrx:latest
+FROM ${BASE_IMAGE}
+
+USER root
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      nodejs npm git ca-certificates && \
+    npm install -g @anthropic-ai/claude-code && \
+    npm cache clean --force && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+
+# Back to the unprivileged user the base image runs as (HOME=/tmp is inherited)
+USER openwebrx
