@@ -74,6 +74,22 @@ jobs:
             grep -qx sdrplay_apiServ /proc/[0-9]*/comm
           '
 
+      # No radio in CI; this proves SoapySDR loads the module (it registers the
+      # sdrplay factory) and that enumerating through the API service does not error.
+      - name: SoapySDR loads the SDRplay module
+        run: |
+          docker exec owrx-test sh -c '
+            set -eu
+            SoapySDRUtil --info | tee /tmp/soapy-info
+            grep -i "factories" /tmp/soapy-info | grep -iqw sdrplay
+            # Exits 1 with "No devices found!" when no radio is attached; anything
+            # else in the output (e.g. the API service being unreachable) is a failure.
+            out=$(SoapySDRUtil --find="driver=sdrplay" 2>&1 || true)
+            echo "$out"
+            echo "$out" | grep -q "No devices found"
+            ! echo "$out" | grep -Eiq "error|fail|unable|cannot"
+          '
+
       - name: Container logs
         if: always()
         run: docker logs owrx-test
